@@ -9,6 +9,8 @@ const utils = @import("utils.zig");
 const Target = enum { x86_64, aarch64, riscv32 };
 
 const BUFSIZE = 65536;
+const DEFAULT_SRC = "src/main.dhjsjs";
+const DEFAULT_OUT = "output/out.bin";
 
 fn readFile(path: []const u8, buf: []u8) ?[]u8 {
     var p: [256]u8 = undefined;
@@ -57,6 +59,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
     var parser = parser_mod.Parser.init(src.ptr, src.len);
     const prog = parser.parse();
 
+    const SYS_CHMOD: usize = 90;
     switch (target) {
         .x86_64 => {
             var cb = compiler_mod.compile(prog, &parser.pool);
@@ -80,12 +83,13 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             if (!writeFile(out_path, cb.get())) return false;
         },
     }
+    _ = sys.syscall2(SYS_CHMOD, @intFromPtr(out_path.ptr), 0x1ED);
     return true;
 }
 
 fn cmdBuild(args: []const []const u8) void {
-    var src_file: []const u8 = "src/main.dhjsjs";
-    var out_file: []const u8 = "output/out.bin";
+    var src_file: []const u8 = DEFAULT_SRC;
+    var out_file: []const u8 = DEFAULT_OUT;
     var target: Target = .x86_64;
 
     var i: usize = 2;
@@ -128,7 +132,7 @@ fn cmdBuild(args: []const []const u8) void {
 }
 
 fn cmdRun(args: []const []const u8) void {
-    var src_file: []const u8 = "src/main.dhjsjs";
+    var src_file: []const u8 = DEFAULT_SRC;
     var target: Target = .x86_64;
 
     var i: usize = 2;
@@ -168,11 +172,20 @@ fn cmdRun(args: []const []const u8) void {
     var cb = compiler_mod.compile(prog, &parser.pool);
     cb.buildElf64();
 
-    var tmppath: [32]u8 = undefined;
-    var ti: usize = 0;
-    const tmpp = "/tmp/dhjsjs_run_XXXXXX";
-    while (ti < tmpp.len and tmpp[ti] != 0) : (ti += 1) tmppath[ti] = tmpp[ti];
-    tmppath[ti] = 0;
+    var tmppath: [32]u8 = @splat(0);
+    const tpl = "/tmp/dhjsjs_run_XXXXXX";
+    @memcpy(tmppath[0..tpl.len], tpl);
+    { // replace X's with random hex chars
+        const urandom_fd = sys.open("/dev/urandom\x00", 0, 0);
+        if (urandom_fd >= 0) {
+            var rand: [6]u8 = undefined;
+            _ = sys.read(urandom_fd, &rand, rand.len);
+            sys.close(urandom_fd);
+            const hex = "0123456789abcdef";
+            var j: usize = 0;
+            while (j < 6) : (j += 1) tmppath[tpl.len - 6 + j] = hex[rand[j] % 16];
+        }
+    }
 
     const tmpfd = sys.open(&tmppath, sys.O_RDWR | 0x40, 0x1A4);
     if (tmpfd < 0) {
@@ -198,23 +211,22 @@ fn cmdNew(args: []const []const u8) void {
     const name = args[2];
 
     _ = sys.mkdir(name.ptr, 0x1C0);
-    var src_dir: [256]u8 = undefined;
+    var src_dir: [256]u8 = @splat(0);
     var di: usize = 0;
     for (name) |c| { src_dir[di] = c; di += 1; }
     const suffix = "/src\x00";
     for (suffix) |c| { src_dir[di] = c; di += 1; }
-
     _ = sys.mkdir(&src_dir, 0x1C0);
 
-    var main_path: [256]u8 = undefined;
+    var main_path: [256]u8 = @splat(0);
     var mi: usize = 0;
     for (name) |c| { main_path[mi] = c; mi += 1; }
     const msuffix = "/src/main.dhjsjs\x00";
     for (msuffix) |c| { main_path[mi] = c; mi += 1; }
 
     const template =
-        \\fn main() {
-        \\    let x = 42;
+        \\fn main() int {
+        \\    hui x = 42;
         \\    return x;
         \\}
         ;

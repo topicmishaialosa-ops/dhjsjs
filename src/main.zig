@@ -75,7 +75,7 @@ fn buildProject(ide: *ide_mod.IdeState) void {
     writeFile("output/out_arm64.bin\x00", cb_arm.get());
 
     ide.setStatus("built: x86_64 ELF + ARM64 ELF");
-    ide.addConsole("Build OK: output/out.bin (x86) + out_arm64.bin (ARM)\n");
+    ide.addConsole("Build OK: out.bin (x86) + out_arm64.bin (ARM)\n");
 }
 
 fn parseEnv() void {
@@ -200,9 +200,9 @@ pub fn main() void {
 
         var ide = ide_mod.IdeState.init();
         const source = 
-        \\fn main() {
-        \\    let x = 42;
-        \\    let name = "dhjsjs";
+        \\fn main() int {
+        \\    hui x = 42;
+        \\    hui name = "dhjsjs";
         \\    return x;
         \\}
         ;
@@ -288,12 +288,12 @@ pub fn main() void {
 
         var ide = ide_mod.IdeState.init();
         const source =
-        \\fn main() {
-        \\    let x = 42;
-        \\    let name = "dhjsjs";
-        \\    return x;
-        \\}
-        ;
+    \\fn main() int {
+    \\    hui x = 42;
+    \\    hui name = "dhjsjs";
+    \\    return x;
+    \\}
+;
         ide.setContent(source);
         ide.addConsole("dhjsjs IDE ready  |  F5=Build  Ctrl+S=Save  Ctrl+O=Open\n");
 
@@ -314,12 +314,12 @@ pub fn main() void {
     } else {
         var ide = ide_mod.IdeState.init();
         const source =
-        \\fn main() {
-        \\    let x = 42;
-        \\    let name = "dhjsjs";
-        \\    return x;
-        \\}
-        ;
+    \\fn main() int {
+    \\    hui x = 42;
+    \\    hui name = "dhjsjs";
+    \\    return x;
+    \\}
+;
         ide.setContent(source);
         ide.addConsole("dhjsjs IDE ready  |  F5=Build  Ctrl+S=Save  Ctrl+O=Open\n");
         ttyMain(&ide);

@@ -131,16 +131,30 @@ pub const Lexer = struct {
     }
 
     fn readSymbol(self: *Lexer, line: usize, col: usize) Token {
-        const tok = Token{ .kind = .symbol, .start = self.source + self.pos, .len = 1, .line = line, .col = col };
-        self.pos += 1;
-        self.col += 1;
-        return tok;
+        const start = self.pos;
+        const ch = self.source[self.pos];
+        var len: usize = 1;
+        if (self.pos + 1 < self.len) {
+            const nch = self.source[self.pos + 1];
+            if ((ch == '=' and nch == '=') or
+                (ch == '!' and nch == '=') or
+                (ch == '<' and nch == '=') or
+                (ch == '>' and nch == '=') or
+                (ch == '&' and nch == '&') or
+                (ch == '|' and nch == '|'))
+            {
+                len = 2;
+            }
+        }
+        self.pos += len;
+        self.col += len;
+        return Token{ .kind = .symbol, .start = self.source + start, .len = len, .line = line, .col = col };
     }
 };
 
 fn isKeyword(ptr: [*]const u8, len: usize) bool {
     const words = [_][]const u8{
-        "fn", "let", "if", "else", "return", "while",
+        "fn", "hui", "if", "uebok", "return", "while",
         "activity", "compose", "state", "viewmodel",
         "true", "false", "null", "int", "string", "bool", "void",
     };

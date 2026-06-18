@@ -28,7 +28,7 @@ const SCROLL_THUMB = gfx.rgb(70, 70, 70);
 const MODIFIED_COL = gfx.rgb(255, 180, 50);
 
 fn isKw(s: []const u8) bool {
-    const words = [_][]const u8{ "fn", "let", "if", "else", "return", "while", "activity", "compose", "state", "viewmodel", "true", "false", "null", "int", "string", "bool", "void" };
+    const words = [_][]const u8{ "fn", "hui", "if", "uebok", "return", "while", "activity", "compose", "state", "viewmodel", "true", "false", "null", "int", "string", "bool", "void" };
     for (words) |w| { if (utils.sliceEql(s, w)) return true; }
     return false;
 }

@@ -1,0 +1,70 @@
+{
+  "name": "dhjsjs",
+  "scopeName": "source.dhjsjs",
+  "fileTypes": ["dhjsjs"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#booleans" },
+    { "include": "#identifiers" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [{
+        "name": "comment.line.double-slash.dhjsjs",
+        "begin": "\\/\\/",
+        "end": "$"
+      }]
+    },
+    "strings": {
+      "patterns": [{
+        "name": "string.quoted.double.dhjsjs",
+        "begin": "\"",
+        "end": "\"",
+        "patterns": [{
+          "name": "constant.character.escape.dhjsjs",
+          "match": "\\\\."
+        }]
+      }]
+    },
+    "numbers": {
+      "patterns": [{
+        "name": "constant.numeric.dhjsjs",
+        "match": "\\b[0-9]+\\b"
+      }]
+    },
+    "keywords": {
+      "patterns": [{
+        "name": "keyword.control.dhjsjs",
+        "match": "\\b(fn|hui|if|uebok|return|while)\\b"
+      }]
+    },
+    "types": {
+      "patterns": [{
+        "name": "storage.type.dhjsjs",
+        "match": "\\b(int|string|bool|void)\\b"
+      }]
+    },
+    "booleans": {
+      "patterns": [{
+        "name": "constant.language.dhjsjs",
+        "match": "\\b(true|false|null)\\b"
+      }]
+    },
+    "activity": {
+      "patterns": [{
+        "name": "entity.name.function.dhjsjs",
+        "match": "\\b(activity|compose|viewmodel|state)\\b"
+      }]
+    },
+    "identifiers": {
+      "patterns": [{
+        "name": "variable.other.dhjsjs",
+        "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\b"
+      }]
+    }
+  }
+}

@@ -146,12 +146,12 @@ pub const CodeBuffer = struct {
 
     pub fn subRImm32(self: *CodeBuffer, r: u8, val: i32) void {
         if (val >= -128 and val <= 127) {
-            self.rex_if(r, 0);
+            self.rex_wb(0, if (r >= 8) 1 else 0);
             self.byte(0x83);
             self.modrm(3, 5, r);
             self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
         } else {
-            self.rex_if(r, 0);
+            self.rex_wb(0, if (r >= 8) 1 else 0);
             self.byte(0x81);
             self.modrm(3, 5, r);
             self.dword(@as(u32, @bitCast(val)));
@@ -176,6 +176,92 @@ pub const CodeBuffer = struct {
             self.modrm(3, 7, r);
             self.dword(@as(u32, @bitCast(val)));
         }
+    }
+
+    pub fn imulRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        self.rex_if(dst, src);
+        self.byte(0x0F);
+        self.byte(0xAF);
+        self.modrm(3, dst, src);
+    }
+
+    pub fn cqo(self: *CodeBuffer) void {
+        self.rex_w(0, 0, 0);
+        self.byte(0x99);
+    }
+
+    pub fn idivR(self: *CodeBuffer, r: u8) void {
+        self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+        self.byte(0xF7);
+        self.modrm(3, 7, r);
+    }
+
+    pub fn andRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        self.rex_if(dst, src);
+        self.byte(0x21);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn orRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        self.rex_if(dst, src);
+        self.byte(0x09);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn negR(self: *CodeBuffer, r: u8) void {
+        self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+        self.byte(0xF7);
+        self.modrm(3, 3, r);
+    }
+
+    pub fn notR(self: *CodeBuffer, r: u8) void {
+        self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+        self.byte(0xF7);
+        self.modrm(3, 2, r);
+    }
+
+    pub fn pushfq(self: *CodeBuffer) void {
+        self.byte(0x9C);
+    }
+
+    pub fn popfq(self: *CodeBuffer) void {
+        self.byte(0x9D);
+    }
+
+    pub fn sete(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x94);
+        self.modrm(3, 0, r);
+    }
+
+    pub fn setne(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x95);
+        self.modrm(3, 0, r);
+    }
+
+    pub fn setl(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x9C);
+        self.modrm(3, 0, r);
+    }
+
+    pub fn setg(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x9F);
+        self.modrm(3, 0, r);
+    }
+
+    pub fn setle(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x9E);
+        self.modrm(3, 0, r);
+    }
+
+    pub fn setge(self: *CodeBuffer, r: u8) void {
+        self.byte(0x0F);
+        self.byte(0x9D);
+        self.modrm(3, 0, r);
     }
 
     pub fn cmpRR(self: *CodeBuffer, a: u8, b: u8) void {
