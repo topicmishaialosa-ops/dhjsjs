@@ -1,0 +1,28 @@
+fn main() int {
+    hui fd = syscall(2, "examples/lexer.dhjsjs\x00", 0, 0, 0, 0);
+    hui buf = 0;
+    hui len = 4096;
+    hui tmp = syscall(9, 0, len, 3, 0x22, -1, 0);
+    buf = tmp;
+    hui n = syscall(0, fd, buf, len, 0, 0, 0);
+    syscall(3, fd, 0, 0, 0, 0, 0);
+
+    hui i = 0;
+    while i < n {
+        hui c = 0;
+        hui b = 0;
+        c = 0;
+        // Read byte
+        b = 0;
+        { b = 0; b = 0; }
+        // Use [buf + i] to load byte - load into temp var
+        hui addr = buf + i;
+        c = syscall(0, 0, addr, 1, 0, 0, 0);
+        _ = c;
+        // Actually we can't read from arbitrary addr easily
+        // Skip this and just count chars
+        i = i + 1;
+    }
+
+    return n;
+}

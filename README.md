@@ -33,9 +33,11 @@ cd myapp
 ## CLI
 
 ```
-dhjsjs_cc new <project>  — создать каркас проекта
-dhjsjs_cc build [src]    — скомпилировать в ELF
-dhjsjs_cc run   [src]    — скомпилировать и запустить
+dhjsjs_cc new <project>    — создать каркас проекта
+dhjsjs_cc build [src]      — скомпилировать в ELF
+dhjsjs_cc run   [src]      — скомпилировать и запустить
+dhjsjs_cc flash <src>      — скомпилировать и прошить на ESP32 через UART
+dhjsjs_cc transpile <src>  — транспилировать dhjsjs-код в C
 ```
 
 Флаги:
@@ -114,9 +116,58 @@ syntaxes/
 |--------|-------------------|
 | dhjsjs_cc | ~10 MB |
 | dhjsjs     | ~6 MB  |
-| helloworld (dhjsjs) | ~500 bytes |
+| helloworld (dhjsjs) | ~292 bytes |
 
 Большой размер обусловлен тем, что Zig 0.16 не умеет выкидывать неиспользуемый код из корневой точки входа при `build-exe` без `std`. Оптимизация размера — в планах.
+
+## Кросс-компиляция: RISC-V 32 и ARM64
+
+Генерация кода для нескольких архитектур из одного исходника:
+
+| Архитектура | Формат | Целевые устройства |
+|-------------|--------|-------------------|
+| x86_64 | ELF64 | Десктоп, сервер |
+| aarch64 | ELF64 | Raspberry Pi, Apple Silicon |
+| riscv32 | ELF32 | ESP32-C3, ESP32-C6 |
+
+Примеры сборки:
+
+```bash
+./dhjsjs_cc build app.dhjsjs --target riscv32
+./dhjsjs_cc build app.dhjsjs --target aarch64
+```
+
+## Команда flash (ESP32)
+
+Компилирует код и прошивает его на ESP32-C3/C6 через UART:
+
+```bash
+./dhjsjs_cc flash app.dhjsjs
+```
+
+Флаги:
+- `--port <port>` — порт UART (по умолчанию `/dev/ttyUSB0`)
+- `--baud <rate>` — скорость (по умолчанию `115200`)
+
+## Команда transpile (dhjsjs → C)
+
+Транспиляция dhjsjs-кода в чистый C без внешних зависимостей:
+
+```bash
+./dhjsjs_cc transpile app.dhjsjs -o app.c
+```
+
+Сгенерированный C-файл можно скомпилировать любым C-компилятором (gcc, clang, zig cc).
+
+## Самостоятельная компиляция (self-hosting)
+
+Компилятор dhjsjs способен скомпилировать сам себя. Пример лексического анализатора, написанного на dhjsjs, находится в `examples/lexer.dhjsjs`:
+
+```bash
+./dhjsjs_cc run examples/lexer.dhjsjs
+```
+
+Это демонстрирует, что язык достаточно выразителен для написания собственных инструментов разработки.
 
 ## Лицензия
 

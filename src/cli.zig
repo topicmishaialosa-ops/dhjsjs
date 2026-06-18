@@ -1,5 +1,6 @@
 const parser_mod = @import("parser.zig");
 const compiler_mod = @import("compiler.zig");
+const compiler_rv = @import("compiler_rv.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const codegen_rv = @import("codegen_rv.zig");
@@ -75,10 +76,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             if (!writeFile(out_path, cb.get())) return false;
         },
         .riscv32 => {
-            var cb = codegen_rv.CodeBuffer.init();
-            cb.li(codegen_rv.A7, 93);
-            cb.li(codegen_rv.A0, 0);
-            cb.ecall();
+            var cb = compiler_rv.compile(prog, &parser.pool);
             cb.buildElf32();
             if (!writeFile(out_path, cb.get())) return false;
         },
@@ -244,20 +242,307 @@ fn cmdNew(args: []const []const u8) void {
 
 fn cmdHelp() void {
     const help =
-        \\dhjsjs compiler v0.1
+        \\dhjsjs compiler v0.2
         \\
         \\Usage:
         \\  dhjsjs_cc build [file] [-o output] [--target x86_64|aarch64|riscv32|esp32]
         \\  dhjsjs_cc run [file]
         \\  dhjsjs_cc new <project>
+        \\  dhjsjs_cc flash [file] --target esp32 [--port /dev/ttyUSB0]
+        \\  dhjsjs_cc transpile [file] [-o output]
         \\
         \\Targets:
         \\  x86_64   - Linux x86_64 (default)
         \\  aarch64  - Linux ARM64
-        \\  riscv32  - RISC-V 32-bit (ESP32-C3 and similar)
+        \\  riscv32  - RISC-V 32-bit (ESP32-C3/C6)
         \\  esp32    - alias for riscv32
+        \\  esp32c3  - alias for riscv32
         ;
     sys.writeStr(1, help.ptr, help.len);
+}
+
+fn cmdTranspile(args: []const []const u8) void {
+    var src_file: []const u8 = DEFAULT_SRC;
+    var out_file: []const u8 = "output/out.c";
+
+    var i: usize = 2;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (strEql(a, "-o") or strEql(a, "--output")) {
+            i += 1;
+            if (i < args.len) out_file = args[i];
+        } else if (a.len > 0 and a[0] != '-') {
+            src_file = a;
+        }
+    }
+
+    var buf: [BUFSIZE]u8 = undefined;
+    const src = readFile(src_file, buf[0..]) orelse {
+        sys.writeStr(2, "error: cannot read '", 20);
+        sys.writeStr(2, src_file.ptr, src_file.len);
+        sys.writeStr(2, "'\n", 2);
+        sys.exit(1);
+    };
+
+    var parser = parser_mod.Parser.init(src.ptr, src.len);
+    _ = parser.parse();
+
+    // Generate C code by walking AST
+    var cbuf: [BUFSIZE]u8 = undefined;
+    var cpos: usize = 0;
+
+    cpos += genStr("#include <stdlib.h>\n#include <stdio.h>\n#include <stdint.h>\n\n", &cbuf, cpos);
+
+    // Walk program children for function declarations
+    var pi: usize = 0;
+    while (pi < parser_mod.MAX_NODES) : (pi += 1) {
+        const n = &parser.pool[pi];
+        if (n.kind == .program) {
+            var ch = n.first_child;
+            while (ch != parser_mod.NO_NODE) {
+                const cn = &parser.pool[@as(usize, @intCast(ch))];
+                if (cn.kind == .fn_decl) {
+                    cpos += genFnC(cn, &parser.pool, &cbuf, cpos);
+                }
+                ch = cn.next_sibling;
+            }
+        }
+    }
+
+    if (cpos > 0) cbuf[cpos] = 0;
+    if (!writeFile(out_file, cbuf[0..cpos])) {
+        sys.writeStr(2, "error: write failed\n", 20);
+        sys.exit(1);
+    }
+
+    sys.writeStr(1, "transpiled: ", 12);
+    sys.writeStr(1, out_file.ptr, out_file.len);
+    sys.writeStr(1, "\n", 1);
+}
+
+fn genStr(s: []const u8, buf: []u8, pos: usize) usize {
+    var p = pos;
+    for (s) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+    return p;
+}
+
+fn genFnC(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, buf: []u8, pos: usize) usize {
+    var p = pos;
+    const name = n.name_start[0..n.name_len];
+    p = genStr("int64_t ", buf, p);
+    p = genStr(name, buf, p);
+    p = genStr("() {\n", buf, p);
+    if (n.first_child != parser_mod.NO_NODE) {
+        p = genStmtC(n.first_child, pool, buf, p, &[_][]const u8{}, 0);
+    }
+    p = genStr("\n}\n\n", buf, p);
+    return p;
+}
+
+fn genStmtC(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, buf: []u8, pos: usize, vars: []const []const u8, vc: usize) usize {
+    if (idx == parser_mod.NO_NODE) return pos;
+    const n = &pool[@as(usize, @intCast(idx))];
+    var p = pos;
+
+    switch (n.kind) {
+        .block => {
+            p = genStr("{\n", buf, p);
+            var ch = n.first_child;
+            while (ch != parser_mod.NO_NODE) {
+                p = genStmtC(ch, pool, buf, p, vars, vc);
+                ch = pool[@as(usize, @intCast(ch))].next_sibling;
+            }
+            p = genStr("}\n", buf, p);
+        },
+        .var_decl => {
+            const vname = n.name_start[0..n.name_len];
+            p = genStr("int64_t ", buf, p);
+            p = genStr(vname, buf, p);
+            if (n.first_child != parser_mod.NO_NODE) {
+                p = genStr(" = ", buf, p);
+                p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            }
+            p = genStr(";\n", buf, p);
+        },
+        .ret_stmt => {
+            p = genStr("return ", buf, p);
+            if (n.first_child != parser_mod.NO_NODE) {
+                p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            }
+            p = genStr(";\n", buf, p);
+        },
+        .if_stmt => {
+            const cond = n.first_child;
+            const then_blk = if (cond != parser_mod.NO_NODE) pool[@as(usize, @intCast(cond))].next_sibling else parser_mod.NO_NODE;
+            const else_blk = if (then_blk != parser_mod.NO_NODE) pool[@as(usize, @intCast(then_blk))].next_sibling else parser_mod.NO_NODE;
+            p = genStr("if (", buf, p);
+            if (cond != parser_mod.NO_NODE) p = genExprC(cond, pool, buf, p, vars, vc);
+            p = genStr(") ", buf, p);
+            if (then_blk != parser_mod.NO_NODE) p = genStmtC(then_blk, pool, buf, p, vars, vc);
+            if (else_blk != parser_mod.NO_NODE) {
+                p = genStr(" else ", buf, p);
+                p = genStmtC(else_blk, pool, buf, p, vars, vc);
+            }
+        },
+        .while_stmt => {
+            const cond = n.first_child;
+            const body = if (cond != parser_mod.NO_NODE) pool[@as(usize, @intCast(cond))].next_sibling else parser_mod.NO_NODE;
+            p = genStr("while (", buf, p);
+            if (cond != parser_mod.NO_NODE) p = genExprC(cond, pool, buf, p, vars, vc);
+            p = genStr(") ", buf, p);
+            if (body != parser_mod.NO_NODE) p = genStmtC(body, pool, buf, p, vars, vc);
+        },
+        .assign => {
+            const aname = n.name_start[0..n.name_len];
+            p = genStr(aname, buf, p);
+            p = genStr(" = ", buf, p);
+            if (n.first_child != parser_mod.NO_NODE) {
+                p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            }
+            p = genStr(";\n", buf, p);
+        },
+        else => {
+            var ch = n.first_child;
+            while (ch != parser_mod.NO_NODE) {
+                p = genStmtC(ch, pool, buf, p, vars, vc);
+                ch = pool[@as(usize, @intCast(ch))].next_sibling;
+            }
+        },
+    }
+    return p;
+}
+
+fn genExprC(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, buf: []u8, pos: usize, vars: []const []const u8, vc: usize) usize {
+    if (idx == parser_mod.NO_NODE) return genStr("0", buf, pos);
+    const n = &pool[@as(usize, @intCast(idx))];
+    var p = pos;
+
+    switch (n.kind) {
+        .int_lit => {
+            const s = n.val_start[0..n.val_len];
+            for (s) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+        },
+        .ident => {
+            const s = n.name_start[0..n.name_len];
+            for (s) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+        },
+        .binary_op => {
+            const op = n.name_start[0..n.name_len];
+            const left = n.first_child;
+            const right = if (left != parser_mod.NO_NODE) pool[@as(usize, @intCast(left))].next_sibling else parser_mod.NO_NODE;
+            p = genStr("(", buf, p);
+            if (left != parser_mod.NO_NODE) p = genExprC(left, pool, buf, p, vars, vc);
+            p = genStr(" ", buf, p);
+            for (op) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+            p = genStr(" ", buf, p);
+            if (right != parser_mod.NO_NODE) p = genExprC(right, pool, buf, p, vars, vc);
+            p = genStr(")", buf, p);
+        },
+        .unary_op => {
+            const op = n.name_start[0..n.name_len];
+            const operand = n.first_child;
+            p = genStr("(", buf, p);
+            for (op) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+            if (operand != parser_mod.NO_NODE) p = genExprC(operand, pool, buf, p, vars, vc);
+            p = genStr(")", buf, p);
+        },
+        .call => {
+            const cname = n.name_start[0..n.name_len];
+            for (cname) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+            p = genStr("(", buf, p);
+            var ch = n.first_child;
+            var first = true;
+            while (ch != parser_mod.NO_NODE) {
+                if (!first) p = genStr(", ", buf, p);
+                p = genExprC(ch, pool, buf, p, vars, vc);
+                first = false;
+                ch = pool[@as(usize, @intCast(ch))].next_sibling;
+            }
+            p = genStr(")", buf, p);
+        },
+        else => {
+            p = genStr("0", buf, p);
+        },
+    }
+    return p;
+}
+
+fn cmdFlash(args: []const []const u8) void {
+    var src_file: []const u8 = DEFAULT_SRC;
+    var target: Target = .x86_64;
+    var port: []const u8 = "/dev/ttyUSB0";
+
+    var i: usize = 2;
+    while (i < args.len) : (i += 1) {
+        const a = args[i];
+        if (strEql(a, "--target")) {
+            i += 1;
+            if (i < args.len) {
+                target = parseTarget(args[i]) orelse {
+                    sys.writeStr(2, "error: unknown target\n", 22);
+                    sys.exit(1);
+                };
+            }
+        } else if (strEql(a, "--port")) {
+            i += 1;
+            if (i < args.len) port = args[i];
+        } else if (a.len > 0 and a[0] != '-') {
+            src_file = a;
+        }
+    }
+
+    if (target != .riscv32) {
+        sys.writeStr(2, "error: flash only supports riscv32/esp32 targets\n", 50);
+        sys.exit(1);
+    }
+
+    var buf: [BUFSIZE]u8 = undefined;
+    const src = readFile(src_file, buf[0..]) orelse {
+        sys.writeStr(2, "error: cannot read '", 20);
+        sys.writeStr(2, src_file.ptr, src_file.len);
+        sys.writeStr(2, "'\n", 2);
+        sys.exit(1);
+    };
+
+    const elf_path = "/tmp/dhjsjs_flash.elf\x00";
+    if (!compileSource(src, target, elf_path[0..elf_path.len - 1])) {
+        sys.writeStr(2, "error: compilation failed\n", 26);
+        sys.exit(1);
+    }
+
+    // Call esptool.py to flash
+    sys.writeStr(1, "flashing to ESP32 via ", 22);
+    sys.writeStr(1, port.ptr, port.len);
+    sys.writeStr(1, "...\n", 4);
+
+    var argv: [5][*]const u8 = undefined;
+    var apath: [256]u8 = @splat(0);
+    var ai2: usize = 0;
+    for ("/usr/bin/esptool.py") |c| { apath[ai2] = c; ai2 += 1; }
+    argv[0] = &apath;
+    argv[1] = "--chip";
+    argv[2] = "esp32c3";
+    argv[3] = "write_flash";
+    argv[4] = "0x0";
+
+    // Build args with port
+    var full_argv: [8][*]const u8 = undefined;
+    full_argv[0] = &apath;
+    full_argv[1] = "--chip";
+    full_argv[2] = "esp32c3";
+    full_argv[3] = "--port";
+    var pbuf: [256]u8 = @splat(0);
+    var pi2: usize = 0;
+    for (port) |c| { pbuf[pi2] = c; pi2 += 1; }
+    full_argv[4] = &pbuf;
+    full_argv[5] = "write_flash";
+    full_argv[6] = "0x0";
+    full_argv[7] = elf_path[0..].ptr;
+
+    const SYS_EXECVE: usize = 59;
+    _ = sys.syscall3(SYS_EXECVE, @intFromPtr(&full_argv), @intFromPtr(&full_argv), 0);
+    sys.writeStr(2, "error: esptool.py exec failed (install esptool)\n", 49);
+    sys.exit(1);
 }
 
 pub fn main() void {
@@ -291,6 +576,10 @@ pub fn main() void {
         cmdRun(args[0..ai]);
     } else if (strEql(cmd, "new")) {
         cmdNew(args[0..ai]);
+    } else if (strEql(cmd, "flash")) {
+        cmdFlash(args[0..ai]);
+    } else if (strEql(cmd, "transpile")) {
+        cmdTranspile(args[0..ai]);
     } else if (strEql(cmd, "--help") or strEql(cmd, "-h")) {
         cmdHelp();
     } else {
