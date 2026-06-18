@@ -1,10 +1,31 @@
 const gfx = @import("render.zig");
-const comp = @import("compositor.zig");
 const utils = @import("utils.zig");
-const sys = @import("sys.zig");
 
 const MAX_FILENAME = 256;
 const MAX_CONTENT = 65536;
+const MAX_CONSOLE = 8192;
+
+// ── Arduino IDE-inspired palette (dark) ──
+const MENU_BG = gfx.rgb(51, 51, 51);
+const MENU_TEXT = gfx.rgb(200, 200, 200);
+const TOOL_BG = gfx.rgb(60, 60, 60);
+const TOOL_TEXT = gfx.rgb(180, 200, 180);
+const TAB_BG = gfx.rgb(45, 45, 45);
+const TAB_ACTIVE = gfx.rgb(30, 30, 30);
+const TAB_ACCENT = gfx.rgb(0, 151, 157);
+const EDITOR_BG = gfx.rgb(30, 30, 30);
+const GUTTER_BG = gfx.rgb(38, 38, 38);
+const GUTTER_LINE = gfx.rgb(50, 50, 50);
+const CUR_LINE_BG = gfx.rgb(44, 44, 44);
+const CONSOLE_BG = gfx.rgb(24, 24, 24);
+const CONSOLE_TEXT = gfx.rgb(120, 190, 130);
+const STATUS_BG = gfx.rgb(51, 51, 51);
+const STATUS_TEXT = gfx.rgb(160, 160, 160);
+const TEXT_COL = gfx.rgb(230, 230, 230);
+const NUML_COL = gfx.rgb(100, 100, 100);
+const NUML_CUR = gfx.rgb(200, 200, 200);
+const SCROLL_THUMB = gfx.rgb(70, 70, 70);
+const MODIFIED_COL = gfx.rgb(255, 180, 50);
 
 fn isKw(s: []const u8) bool {
     const words = [_][]const u8{ "fn", "let", "if", "else", "return", "while", "activity", "compose", "state", "viewmodel", "true", "false", "null", "int", "string", "bool", "void" };
@@ -12,17 +33,19 @@ fn isKw(s: []const u8) bool {
     return false;
 }
 
-fn isNum(s: []const u8) bool {
-    if (s.len == 0) return false;
-    for (s) |c| { if (c < '0' or c > '9') return false; }
-    return true;
-}
-
 const HL_KEYWORD: u8 = 0;
 const HL_STRING: u8 = 1;
 const HL_NUMBER: u8 = 2;
 const HL_COMMENT: u8 = 3;
 const HL_NORMAL: u8 = 4;
+const HL_FUNC: u8 = 5;
+
+fn fontScale(w: u32) u32 {
+    const raw = @divFloor(@min(w, 3600), 600);
+    if (raw < 1) return 1;
+    if (raw > 3) return 3;
+    return raw;
+}
 
 fn highlightLine(line: []const u8, buf: []u8) void {
     var i: usize = 0;
@@ -30,21 +53,17 @@ fn highlightLine(line: []const u8, buf: []u8) void {
         if (line[i] == '"') {
             buf[i] = HL_STRING;
             i += 1;
-            while (i < line.len and line[i] != '"') : (i += 1) { buf[i] = HL_STRING; }
+            while (i < line.len and line[i] != '"') : (i += 1) buf[i] = HL_STRING;
             if (i < line.len) { buf[i] = HL_STRING; i += 1; }
         } else if (line[i] == '/' and i + 1 < line.len and line[i + 1] == '/') {
-            while (i < line.len) : (i += 1) { buf[i] = HL_COMMENT; if (i >= buf.len) break; }
-        } else if ((line[i] >= 'a' and line[i] <= 'z') or (line[i] >= 'A' and line[i] <= 'Z') or line[i] == '_') {
+            while (i < line.len and i < buf.len) : (i += 1) buf[i] = HL_COMMENT;
+        } else if (utils.isAlpha(line[i]) or line[i] == '_') {
             const start = i;
-            while (i < line.len and ((line[i] >= 'a' and line[i] <= 'z') or (line[i] >= 'A' and line[i] <= 'Z') or (line[i] >= '0' and line[i] <= '9') or line[i] == '_')) : (i += 1) {}
-            if (isKw(line[start..i])) {
-                var k = start;
-                while (k < i and k < buf.len) : (k += 1) buf[k] = HL_KEYWORD;
-            } else {
-                var k = start;
-                while (k < i and k < buf.len) : (k += 1) buf[k] = HL_NORMAL;
-            }
-        } else if (line[i] >= '0' and line[i] <= '9') {
+            while (i < line.len and utils.isAlphaNum(line[i])) : (i += 1) {}
+            const t = isKw(line[start..i]);
+            var k = start;
+            while (k < i and k < buf.len) : (k += 1) buf[k] = if (t) HL_KEYWORD else HL_FUNC;
+        } else if (utils.isDigit(line[i])) {
             buf[i] = HL_NUMBER;
             i += 1;
         } else {
@@ -54,6 +73,25 @@ fn highlightLine(line: []const u8, buf: []u8) void {
     }
 }
 
+fn fmtU32(val: u32, buf: []u8) []const u8 {
+    var tmp: [16]u8 = undefined;
+    var i: usize = 0;
+    var n = val;
+    if (n == 0) {
+        buf[0] = '0';
+        return buf[0..1];
+    }
+    while (n > 0) : (n /= 10) {
+        tmp[i] = @as(u8, @intCast(n % 10)) + '0';
+        i += 1;
+    }
+    var j: usize = 0;
+    while (j < i) : (j += 1) {
+        buf[j] = tmp[i - 1 - j];
+    }
+    return buf[0..i];
+}
+
 pub const IdeState = struct {
     filename: [MAX_FILENAME]u8,
     flen: usize,
@@ -61,19 +99,18 @@ pub const IdeState = struct {
     clen: usize,
     cx: usize,
     cy: usize,
-    scroll_x: usize,
-    scroll_y: usize,
     modified: bool,
     cursor_on: bool,
     frame_count: usize,
-    menu: [4]u8,
-    menu_len: usize,
     status: [64]u8,
     status_len: usize,
-    asm_out: [65536]u8,
-    asm_len: usize,
-    bin_out: [65536]u8,
-    bin_len: usize,
+    console: [MAX_CONSOLE]u8,
+    con_len: usize,
+    request_build: bool,
+    input_mode: bool,
+    input_action: u8, // 'o'=open, 's'=save
+    input_buf: [256]u8,
+    input_len: usize,
 
     pub fn init() IdeState {
         return IdeState{
@@ -83,19 +120,18 @@ pub const IdeState = struct {
             .clen = 0,
             .cx = 0,
             .cy = 0,
-            .scroll_x = 0,
-            .scroll_y = 0,
             .modified = false,
             .cursor_on = true,
             .frame_count = 0,
-            .menu = undefined,
-            .menu_len = 0,
             .status = undefined,
             .status_len = 0,
-            .asm_out = undefined,
-            .asm_len = 0,
-            .bin_out = undefined,
-            .bin_len = 0,
+            .console = undefined,
+            .con_len = 0,
+            .request_build = false,
+            .input_mode = false,
+            .input_action = 0,
+            .input_buf = undefined,
+            .input_len = 0,
         };
     }
 
@@ -114,14 +150,22 @@ pub const IdeState = struct {
         self.status_len = msg.len;
     }
 
+    pub fn addConsole(self: *IdeState, msg: []const u8) void {
+        var i: usize = 0;
+        while (i < msg.len and self.con_len < MAX_CONSOLE - 1) : (i += 1) {
+            self.console[self.con_len] = msg[i];
+            self.con_len += 1;
+        }
+    }
+
     pub fn openFile(self: *IdeState, filepath: []const u8) void {
+        const sys = @import("sys.zig");
         var path: [MAX_FILENAME]u8 = undefined;
         var pi: usize = 0;
         while (pi < filepath.len and pi < MAX_FILENAME - 1) : (pi += 1) path[pi] = filepath[pi];
         path[pi] = 0;
         const fd = sys.open(&path, 0, 0);
         if (fd < 0) { self.setStatus("open failed"); return; }
-
         var total: usize = 0;
         while (total < MAX_CONTENT) {
             const n = sys.read(fd, self.content[total..].ptr, MAX_CONTENT - total);
@@ -129,7 +173,7 @@ pub const IdeState = struct {
             total += @as(usize, @intCast(n));
         }
         sys.close(fd);
-        if (total == 0) { self.setStatus("empty file"); return; }
+        if (total == 0) { self.setStatus("empty"); return; }
         self.clen = total;
         self.cx = 0;
         self.cy = 0;
@@ -141,7 +185,11 @@ pub const IdeState = struct {
     }
 
     pub fn saveFile(self: *IdeState) void {
-        if (self.flen == 0) { self.setStatus("no filename"); return; }
+        if (self.flen == 0) {
+            self.startInput("save");
+            return;
+        }
+        const sys = @import("sys.zig");
         var path: [MAX_FILENAME]u8 = undefined;
         var pi: usize = 0;
         while (pi < self.flen and pi < MAX_FILENAME - 1) : (pi += 1) path[pi] = self.filename[pi];
@@ -154,21 +202,94 @@ pub const IdeState = struct {
         self.setStatus("saved");
     }
 
+    // ── layout ─────────────────────────────────────────────
+    fn Layout(T: type) type {
+        return struct {
+            sc: T,
+            ch_w: T,
+            ch_h: T,
+            menu_h: T,
+            tool_h: T,
+            tab_h: T,
+            gutter_w: T,
+            margin_x: T,
+            top_y: T,
+            con_h: T,
+            status_h: T,
+            ed_h: T,
+        };
+    }
+
+    fn layout(fb: *const gfx.Framebuffer) Layout(u32) {
+        const sc = fontScale(fb.width);
+        const ch_w = sc * 8;
+        const ch_h = sc * 8 + 4;
+        const menu_h = ch_h;
+        const tool_h = ch_h;
+        const tab_h = ch_h;
+        const gutter_w = ch_w * 5 + 14;
+        const margin_x = gutter_w;
+        const top_y = menu_h + tool_h + tab_h;
+        const status_h = ch_h;
+        const avail = if (fb.height > top_y + status_h) fb.height - top_y - status_h else 0;
+        const con_h = avail / 4;
+        const ed_h = if (avail > con_h) avail - con_h else 0;
+        return .{ .sc = sc, .ch_w = ch_w, .ch_h = ch_h, .menu_h = menu_h, .tool_h = tool_h, .tab_h = tab_h, .gutter_w = gutter_w, .margin_x = margin_x, .top_y = top_y, .con_h = con_h, .status_h = status_h, .ed_h = ed_h };
+    }
+
+    // ── paint ───────────────────────────────────────────────
     pub fn paint(self: *IdeState, fb: *gfx.Framebuffer) void {
         self.frame_count +%= 1;
-        self.cursor_on = (self.frame_count / 15) % 2 == 0;
-        fb.fill(gfx.rgb(28, 28, 28));
-        self.drawTitle(fb);
+        const blink_rate = if (fontScale(fb.width) >= 2) @as(usize, 30) else @as(usize, 15);
+        self.cursor_on = (self.frame_count / blink_rate) % 2 == 0;
+        fb.fill(EDITOR_BG);
+        self.drawMenu(fb);
+        self.drawToolbar(fb);
+        self.drawTabBar(fb);
+        self.drawGutter(fb);
         self.drawLines(fb);
         self.drawCursor(fb);
+        if (self.input_mode) self.drawInputPrompt(fb);
+        self.drawConsole(fb);
         self.drawStatus(fb);
     }
 
-    fn drawTitle(self: *IdeState, fb: *gfx.Framebuffer) void {
+    fn drawMenu(_: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = 0, .w = fb.width, .h = L.menu_h }, MENU_BG);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = @as(i32, @intCast(L.menu_h - 1)), .w = fb.width, .h = 1 }, GUTTER_LINE);
+        fb.drawText("File  Edit  Sketch  Tools  Help", 8, @as(i32, @intCast((L.menu_h - L.ch_h) / 2)), MENU_TEXT, L.ch_w);
+    }
+
+    fn drawToolbar(_: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        const y0 = @as(i32, @intCast(L.menu_h));
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0, .w = fb.width, .h = L.tool_h }, TOOL_BG);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0 + @as(i32, @intCast(L.tool_h - 1)), .w = fb.width, .h = 1 }, GUTTER_LINE);
+        fb.drawText(" [Verify]  [Upload]  [New]  [Open]  [Save] ", 8, y0 + @as(i32, @intCast((L.tool_h - L.ch_h) / 2)), TOOL_TEXT, L.ch_w);
+    }
+
+    fn drawTabBar(self: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        const y0 = @as(i32, @intCast(L.menu_h + L.tool_h));
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0, .w = fb.width, .h = L.tab_h }, TAB_BG);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0 + @as(i32, @intCast(L.tab_h - 1)), .w = fb.width, .h = 1 }, GUTTER_LINE);
+
         const title = if (self.flen > 0) self.filename[0..self.flen] else "untitled.dhjsjs";
-        fb.fillRect(gfx.Rect{ .x = 0, .y = 0, .w = fb.width, .h = 26 }, gfx.rgb(55, 55, 55));
-        fb.drawText(title, 8, 6, gfx.rgb(240, 240, 240), 14);
-        fb.drawText(" [File: Ctrl+O Save: Ctrl+S Build: F5]", @intCast(fb.width - 280), 6, gfx.rgb(180, 220, 180), 14);
+        const tab_w = @as(u32, @intCast(@min(@as(usize, L.ch_w * 20), @as(usize, L.ch_w * 2 + @as(u32, @intCast(title.len)) * L.ch_w))));
+
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0, .w = tab_w, .h = L.tab_h }, TAB_ACTIVE);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = y0 + @as(i32, @intCast(L.tab_h - 2)), .w = tab_w, .h = 2 }, TAB_ACCENT);
+
+        const ty2 = y0 + @as(i32, @intCast((L.tab_h - L.ch_h) / 2));
+        var xp: i32 = 8;
+        if (self.modified) {
+            fb.drawText("\xE2\x97\x8B", xp, ty2, MODIFIED_COL, L.ch_w);
+            xp += @as(i32, @intCast(L.ch_w));
+        }
+        const max_chars = (tab_w - @as(u32, @intCast(xp))) / L.ch_w;
+        const display = if (title.len > max_chars) title[0..max_chars] else title;
+        fb.drawText(display, xp, ty2, TEXT_COL, L.ch_w);
     }
 
     fn colorForHL(h: u8) gfx.Color {
@@ -177,84 +298,246 @@ pub const IdeState = struct {
             HL_STRING => gfx.rgb(206, 145, 120),
             HL_NUMBER => gfx.rgb(181, 206, 168),
             HL_COMMENT => gfx.rgb(106, 153, 85),
-            else => gfx.rgb(210, 210, 210),
+            HL_FUNC => gfx.rgb(220, 220, 170),
+            else => TEXT_COL,
         };
     }
 
+    fn drawGutter(_: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        const con_top = @as(i32, @intCast(L.top_y + L.ed_h));
+        fb.fillRect(gfx.Rect{ .x = 0, .y = @as(i32, @intCast(L.top_y)), .w = L.gutter_w, .h = L.ed_h }, GUTTER_BG);
+        fb.fillRect(gfx.Rect{ .x = @as(i32, @intCast(L.gutter_w - 1)), .y = @as(i32, @intCast(L.top_y)), .w = 1, .h = @as(u32, @intCast(con_top - @as(i32, @intCast(L.top_y)))) }, GUTTER_LINE);
+    }
+
     fn drawLines(self: *IdeState, fb: *gfx.Framebuffer) void {
-        const text_x: u32 = 50;
-        var y: u32 = 30;
+        const L = layout(fb);
+        var y: u32 = L.top_y;
         var line: usize = 0;
         var i: usize = 0;
         var line_start: usize = 0;
 
-        while (i <= self.clen and y < fb.height - 20) : (i += 1) {
+        while (i <= self.clen and y + L.ch_h <= L.top_y + L.ed_h) : (i += 1) {
             if (i == self.clen or self.content[i] == '\n') {
                 line += 1;
-                if (line > self.scroll_y + 1) {
-                    var num_buf: [16]u8 = undefined;
-                    const nlen = utils.formatU32(@as(u32, @intCast(line)), &num_buf);
-                    fb.drawText(num_buf[0..nlen], 4, @intCast(y), gfx.rgb(100, 100, 100), 14);
+                if (line > 0) {
+                    const is_current = line == self.cy + 1;
+                    if (is_current) {
+                        fb.fillRect(gfx.Rect{ .x = @as(i32, @intCast(L.margin_x)), .y = @as(i32, @intCast(y)), .w = fb.width - L.margin_x, .h = L.ch_h }, CUR_LINE_BG);
+                    }
+                    var nb: [16]u8 = undefined;
+                    const ns = fmtU32(@as(u32, @intCast(line)), nb[0..]);
+                    fb.drawText(ns, @as(i32, @intCast(L.margin_x - L.ch_w * 4 - 8)), @as(i32, @intCast(y)), if (is_current) NUML_CUR else NUML_COL, L.ch_w);
                 }
-
-                const end = i;
-                const text = self.content[line_start..end];
-                if (text.len > 0 and line > self.scroll_y) {
-                    const vis = if (text.len > 120) text[0..120] else text;
-                    var hl_buf: [120]u8 = undefined;
-                    const hl_len = if (vis.len > 120) 120 else vis.len;
-                    highlightLine(vis, hl_buf[0..hl_len]);
-
-                    var cx_pix: i32 = @intCast(text_x);
+                const text = self.content[line_start..i];
+                if (text.len > 0) {
+                    const max_vis = @as(usize, @intCast((fb.width - L.margin_x) / L.ch_w));
+                    const vis = if (text.len > max_vis) text[0..max_vis] else text;
+                    var hl: [512]u8 = undefined;
+                    const hl_len = @min(vis.len, hl.len);
+                    highlightLine(vis, hl[0..hl_len]);
+                    var cx: i32 = @as(i32, @intCast(L.margin_x));
                     var ci: usize = 0;
                     while (ci < hl_len) : (ci += 1) {
-                        const col = colorForHL(hl_buf[ci]);
-                        const ch = vis[ci];
-                        const glyph = getGlyph(ch);
-                        var gy: u32 = 0;
-                        while (gy < 8) : (gy += 1) {
-                            var gx: u32 = 0;
-                            while (gx < 8) : (gx += 1) {
-                                if ((glyph[gy] & (@as(u8, 1) << @intCast(gx))) != 0) {
-                                    const px = cx_pix + @as(i32, @intCast(gx));
-                                    const py = @as(i32, @intCast(y)) + @as(i32, @intCast(gy));
-                                    if (px >= 0 and py >= 0 and px < @as(i32, @intCast(fb.width)) and py < @as(i32, @intCast(fb.height))) {
-                                        fb.pixels[@as(usize, @intCast(py)) * fb.stride + @as(usize, @intCast(px))] = gfx.colorToU32(col);
-                                    }
-                                }
-                            }
+                        const g = gfx.getGlyph(vis[ci]);
+                        if (vis[ci] == '\t') {
+                            cx += @as(i32, @intCast(L.ch_w)) * 3;
+                        } else if (vis[ci] >= 32) {
+                            fb.drawGlyphScaled(g, cx, @as(i32, @intCast(y)), gfx.colorToU32(colorForHL(hl[ci])), L.sc);
+                            cx += @as(i32, @intCast(L.ch_w));
+                        } else {
+                            cx += @as(i32, @intCast(L.ch_w));
                         }
-                        cx_pix += 8;
                     }
                 }
-                y += 16;
+                y += L.ch_h;
                 line_start = i + 1;
             }
+        }
+
+        const total = @as(u32, @intCast(self.totalLines()));
+        if (total > 0 and L.ed_h > L.ch_h) {
+            const vis_lines = L.ed_h / L.ch_h;
+            const thumb_h = @max(@as(u32, 6), L.ed_h * vis_lines / total);
+            const thumb_y = L.top_y + L.ed_h * @as(u32, @intCast(self.cy)) / total;
+            fb.fillRect(gfx.Rect{ .x = @as(i32, @intCast(fb.width - 5)), .y = @as(i32, @intCast(thumb_y)), .w = 5, .h = @min(thumb_h, L.ed_h) }, SCROLL_THUMB);
         }
     }
 
     fn drawCursor(self: *IdeState, fb: *gfx.Framebuffer) void {
-        if (!self.cursor_on) return;
-        const x = 50 + @as(i32, @intCast(self.cx)) * 8;
-        const y = 30 + @as(i32, @intCast(self.cy)) * 16;
-        if (y < @as(i32, @intCast(fb.height)) - 20) {
-            fb.fillRect(gfx.Rect{ .x = x, .y = y, .w = 8, .h = 16 }, gfx.rgb(255, 200, 50));
+        if (!self.cursor_on or self.input_mode) return;
+        const L = layout(fb);
+        const x = @as(i32, @intCast(L.margin_x)) + @as(i32, @intCast(self.cx)) * @as(i32, @intCast(L.ch_w));
+        const y = @as(i32, @intCast(L.top_y)) + @as(i32, @intCast(self.cy)) * @as(i32, @intCast(L.ch_h));
+        if (y + @as(i32, @intCast(L.ch_h)) <= @as(i32, @intCast(L.top_y + L.ed_h))) {
+            fb.fillRect(gfx.Rect{ .x = x, .y = y, .w = @as(u32, @intCast(@max(@as(i32, @intCast(L.sc)), 2))), .h = L.ch_h }, TEXT_COL);
+        }
+    }
+
+    fn drawInputPrompt(self: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        const y = @as(i32, @intCast(L.top_y + L.ed_h - L.ch_h));
+        fb.fillRect(gfx.Rect{ .x = @as(i32, @intCast(L.margin_x)), .y = y, .w = fb.width - L.margin_x, .h = L.ch_h }, gfx.rgb(20, 40, 45));
+        const prompt = if (self.input_action == 's') "Save: " else "Open: ";
+        const plen: i32 = if (self.input_action == 's') 6 else 6;
+        fb.drawText(prompt, @as(i32, @intCast(L.margin_x + 4)), y, TAB_ACCENT, L.ch_w);
+        const path = self.input_buf[0..self.input_len];
+        const maxc = @as(usize, @intCast((fb.width - L.margin_x - 4) / L.ch_w - @as(u32, @intCast(plen))));
+        const display = if (path.len > maxc) path[path.len - maxc ..] else path;
+        fb.drawText(display, @as(i32, @intCast(L.margin_x + 4)) + @as(i32, @intCast(L.ch_w * @as(u32, @intCast(plen)))), y, TEXT_COL, L.ch_w);
+        if (self.cursor_on) {
+            fb.fillRect(gfx.Rect{ .x = @as(i32, @intCast(L.margin_x + 4)) + @as(i32, @intCast(L.ch_w * @as(u32, @intCast(plen)))) + @as(i32, @intCast(display.len * L.ch_w)), .y = y, .w = 2, .h = L.ch_h }, TEXT_COL);
+        }
+    }
+
+    fn drawConsole(self: *IdeState, fb: *gfx.Framebuffer) void {
+        const L = layout(fb);
+        const con_top = L.top_y + L.ed_h;
+        fb.fillRect(gfx.Rect{ .x = 0, .y = @as(i32, @intCast(con_top)), .w = fb.width, .h = L.con_h }, CONSOLE_BG);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = @as(i32, @intCast(con_top - 1)), .w = fb.width, .h = 1 }, GUTTER_LINE);
+
+        const max_lines = if (L.ch_h > 0) L.con_h / L.ch_h else 1;
+        const total = self.conLines();
+        const skip = if (total > max_lines) total - max_lines else @as(usize, 0);
+
+        var line_idx: usize = 0;
+        var pos = self.findConLineStart(skip);
+        while (pos < self.con_len and line_idx < max_lines) {
+            var end = pos;
+            while (end < self.con_len and self.console[end] != '\n') : (end += 1) {}
+            if (end > pos) {
+                const maxc = @as(usize, @intCast((fb.width - 4) / L.ch_w));
+                const seg = self.console[pos..end];
+                fb.drawText(if (seg.len > maxc) seg[0..maxc] else seg, 4, @as(i32, @intCast(con_top + 2 + line_idx * L.ch_h)), CONSOLE_TEXT, L.ch_w);
+            }
+            line_idx += 1;
+            pos = end + 1;
         }
     }
 
     fn drawStatus(self: *IdeState, fb: *gfx.Framebuffer) void {
-        fb.fillRect(gfx.Rect{ .x = 0, .y = @as(i32, @intCast(fb.height)) - 18, .w = fb.width, .h = 18 }, gfx.rgb(40, 40, 40));
-        fb.drawText(" Ln:", 4, @as(i32, @intCast(fb.height)) - 15, gfx.rgb(140, 140, 140), 12);
-        var lb: [16]u8 = undefined;
-        const ln = utils.formatU32(@as(u32, @intCast(self.cy + 1)), &lb);
-        fb.drawText(lb[0..ln], 24, @as(i32, @intCast(fb.height)) - 15, gfx.rgb(200, 200, 200), 12);
+        const L = layout(fb);
+        const sy = @as(i32, @intCast(L.top_y + L.ed_h + L.con_h));
+        fb.fillRect(gfx.Rect{ .x = 0, .y = sy, .w = fb.width, .h = L.status_h }, STATUS_BG);
+        fb.fillRect(gfx.Rect{ .x = 0, .y = sy - 1, .w = fb.width, .h = 1 }, GUTTER_LINE);
 
-        if (self.modified) {
-            fb.drawText(" *", 50, @as(i32, @intCast(fb.height)) - 15, gfx.rgb(255, 180, 60), 12);
+        const sty = sy + @as(i32, @intCast((L.status_h - L.ch_h) / 2));
+        var lb: [16]u8 = undefined;
+        fb.drawText(fmtU32(@as(u32, @intCast(self.cy + 1)), lb[0..]), 8, sty, TEXT_COL, L.ch_w);
+        fb.drawText(":", 8 + @as(i32, @intCast(L.ch_w)), sty, NUML_COL, L.ch_w);
+        var cb: [16]u8 = undefined;
+        fb.drawText(fmtU32(@as(u32, @intCast(self.cx + 1)), cb[0..]), 8 + @as(i32, @intCast(L.ch_w + L.ch_w / 2 + 2)), sty, TEXT_COL, L.ch_w);
+
+        if (self.modified) fb.drawText("  \xE2\x97\x8B", @as(i32, @intCast(L.ch_w * 3)), sty, MODIFIED_COL, L.ch_w);
+        if (self.status_len > 0) fb.drawText(self.status[0..self.status_len], @as(i32, @intCast(L.ch_w * 5)), sty, STATUS_TEXT, L.ch_w);
+        fb.drawText("dhjsjs  UTF-8", @as(i32, @intCast(fb.width)) - @as(i32, @intCast(L.ch_w * 8)), sty, STATUS_TEXT, L.ch_w);
+    }
+
+    // ── mouse ───────────────────────────────────────────────
+    pub fn handleMouseClick(self: *IdeState, mx: i32, my: i32, fbw: u32, fbh: u32) void {
+        _ = fbh;
+        const sc = fontScale(fbw);
+        const ch_w = sc * 8;
+        const ch_h = sc * 8 + 4;
+        const gutter_w = ch_w * 5 + 14;
+        const top_y = (ch_h) * 3;
+
+        if (my < @as(i32, @intCast(top_y))) {
+            // menu bar
+            if (my < @as(i32, @intCast(ch_h))) {
+                const mc = @divFloor(@max(mx - 8, 0), @as(i32, @intCast(ch_w)));
+                const menu_status = if (mc < 5) "File: Ctrl+S Save | Ctrl+O Open | New" else if (mc < 10) "Edit: Cut | Copy | Paste (not yet)" else if (mc < 16) "Sketch: Verify/Upload (F5)" else if (mc < 21) "Tools: terminal | settings (not yet)" else if (mc < 26) "Help: dhjsjs IDE v0.1" else "";
+                if (menu_status.len > 0) self.setStatus(menu_status);
+                return;
+            }
+            // toolbar: [Verify]=0, [Upload]=1, [New]=2, [Open]=3, [Save]=4
+            if (my >= @as(i32, @intCast(ch_h)) and my < @as(i32, @intCast(ch_h * 2))) {
+                const rel_x = @as(i32, mx - 8);
+                const btn_w = @as(i32, @intCast(ch_w * 5));
+                const spacing = @as(i32, @intCast(ch_w));
+                const idx = @divFloor(rel_x, btn_w + spacing);
+                if (idx == 2) { self.clen = 0; self.cx = 0; self.cy = 0; self.modified = false; }
+                if (idx == 3) self.startInput("open");
+                if (idx == 4) self.saveFile();
+                if (idx == 0 or idx == 1) self.request_build = true;
+            }
+            return;
         }
-        if (self.status_len > 0) {
-            fb.drawText(self.status[0..self.status_len], 80, @as(i32, @intCast(fb.height)) - 15, gfx.rgb(160, 220, 160), 12);
+        const rel_y = @as(u32, @intCast(@max(my - @as(i32, @intCast(top_y)), 0)));
+        const rel_x = @as(u32, @intCast(@max(mx - @as(i32, @intCast(gutter_w)), 0)));
+        const new_cy = rel_y / ch_h;
+        const new_cx = rel_x / ch_w;
+        self.cy = @min(new_cy, self.totalLines() - 1);
+        self.cx = @min(new_cx, self.getLineLen(self.cy));
+    }
+
+    pub fn startInput(self: *IdeState, action: []const u8) void {
+        self.input_mode = true;
+        self.input_len = 0;
+        self.input_action = if (action.len > 0) action[0] else 'o';
+        if (action.len > 0 and action[0] == 's') {
+            self.setStatus("Save as: type path, Enter to save, Esc to cancel");
+        } else {
+            self.setStatus("Open: type path, Enter to open, Esc to cancel");
         }
+    }
+
+    pub fn cancelInput(self: *IdeState) void {
+        self.input_mode = false;
+        self.input_len = 0;
+        self.setStatus("cancelled");
+    }
+
+    pub fn confirmInput(self: *IdeState) void {
+        if (self.input_len > 0) {
+            const path = self.input_buf[0..self.input_len];
+            if (self.input_action == 's') {
+                var fi: usize = 0;
+                while (fi < path.len and fi < MAX_FILENAME - 1) : (fi += 1) self.filename[fi] = path[fi];
+                self.flen = path.len;
+                self.saveFile();
+            } else {
+                self.openFile(path);
+            }
+        }
+        self.input_mode = false;
+        self.input_len = 0;
+    }
+
+    pub fn inputChar(self: *IdeState, ch: u8) bool {
+        if (!self.input_mode) return false;
+        switch (ch) {
+            '\n', '\r' => self.confirmInput(),
+            0x1b => self.cancelInput(),
+            0x7f, 0x08 => { if (self.input_len > 0) self.input_len -= 1; },
+            else => {
+                if (ch >= 32 and ch < 127 and self.input_len < 255) {
+                    self.input_buf[self.input_len] = ch;
+                    self.input_len += 1;
+                }
+            },
+        }
+        return true;
+    }
+
+    // ── helpers ─────────────────────────────────────────────
+    fn conLines(self: *IdeState) usize {
+        var n: usize = 0;
+        for (self.console[0..self.con_len]) |c| { if (c == '\n') n += 1; }
+        return if (self.con_len > 0 and self.console[self.con_len - 1] != '\n') n + 1 else n;
+    }
+
+    fn findConLineStart(self: *IdeState, line: usize) usize {
+        var ln: usize = 0;
+        var i: usize = 0;
+        while (i < self.con_len and ln < line) : (i += 1) { if (self.console[i] == '\n') ln += 1; }
+        return if (i < self.con_len) i + 1 else self.con_len;
+    }
+
+    fn totalLines(self: *IdeState) usize {
+        var n: usize = 1;
+        for (self.content[0..self.clen]) |c| { if (c == '\n') n += 1; }
+        return n;
     }
 
     fn getLineStart(self: *IdeState, line: usize) usize {
@@ -275,6 +558,10 @@ pub const IdeState = struct {
     }
 
     pub fn insertChar(self: *IdeState, ch: u8) void {
+        if (self.input_mode) {
+            _ = self.inputChar(ch);
+            return;
+        }
         if (self.clen >= MAX_CONTENT) return;
         var pos = self.getLineStart(self.cy) + self.cx;
         if (pos > self.clen) pos = self.clen;
@@ -288,6 +575,10 @@ pub const IdeState = struct {
     }
 
     pub fn deleteChar(self: *IdeState) void {
+        if (self.input_mode) {
+            if (self.input_len > 0) self.input_len -= 1;
+            return;
+        }
         var pos = self.getLineStart(self.cy) + self.cx;
         if (pos == 0 or self.clen == 0) return;
         if (pos > self.clen) pos = self.clen;
@@ -309,116 +600,18 @@ pub const IdeState = struct {
     }
 
     pub fn cursorRight(self: *IdeState) void {
-        const line_len = self.getLineLen(self.cy);
-        if (self.cx < line_len) { self.cx += 1; }
-        else {
-            const end = self.getLineEnd(self.cy);
-            if (end < self.clen) { self.cy += 1; self.cx = 0; }
-        }
+        if (self.cx < self.getLineLen(self.cy)) { self.cx += 1; }
+        else if (self.getLineEnd(self.cy) < self.clen) { self.cy += 1; self.cx = 0; }
     }
 
     pub fn cursorUp(self: *IdeState) void {
-        if (self.cy > 0) { self.cy -= 1; const ll = self.getLineLen(self.cy); if (self.cx > ll) self.cx = ll; }
+        if (self.cy > 0) { self.cy -= 1; self.cx = @min(self.cx, self.getLineLen(self.cy)); }
     }
 
     pub fn cursorDown(self: *IdeState) void {
-        const test_line = self.cy + 1;
-        const line_start = self.getLineStart(test_line);
-        if (line_start < self.clen) { self.cy += 1; const ll = self.getLineLen(self.cy); if (self.cx > ll) self.cx = ll; }
+        if (self.getLineStart(self.cy + 1) < self.clen) { self.cy += 1; self.cx = @min(self.cx, self.getLineLen(self.cy)); }
     }
 
     pub fn cursorHome(self: *IdeState) void { self.cx = 0; }
     pub fn cursorEnd(self: *IdeState) void { self.cx = self.getLineLen(self.cy); }
 };
-
-fn getGlyph(ch: u8) [8]u8 {
-    return switch (ch) {
-        'A' => .{ 0x7C, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0x00 },
-        'B' => .{ 0xFC, 0xC6, 0xC6, 0xFC, 0xC6, 0xC6, 0xFC, 0x00 },
-        'C' => .{ 0x7C, 0xC6, 0xC0, 0xC0, 0xC0, 0xC6, 0x7C, 0x00 },
-        'D' => .{ 0xF8, 0xCC, 0xC6, 0xC6, 0xC6, 0xCC, 0xF8, 0x00 },
-        'E' => .{ 0xFE, 0xC0, 0xC0, 0xF8, 0xC0, 0xC0, 0xFE, 0x00 },
-        'F' => .{ 0xFE, 0xC0, 0xC0, 0xF8, 0xC0, 0xC0, 0xC0, 0x00 },
-        'G' => .{ 0x7C, 0xC6, 0xC0, 0xCE, 0xC6, 0xC6, 0x7C, 0x00 },
-        'H' => .{ 0xC6, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0x00 },
-        'I' => .{ 0x7E, 0x18, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00 },
-        'J' => .{ 0x06, 0x06, 0x06, 0x06, 0x06, 0xC6, 0x7C, 0x00 },
-        'K' => .{ 0xC6, 0xCC, 0xD8, 0xF0, 0xD8, 0xCC, 0xC6, 0x00 },
-        'L' => .{ 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xFE, 0x00 },
-        'M' => .{ 0xC6, 0xEE, 0xFE, 0xD6, 0xC6, 0xC6, 0xC6, 0x00 },
-        'N' => .{ 0xC6, 0xE6, 0xF6, 0xDE, 0xCE, 0xC6, 0xC6, 0x00 },
-        'O' => .{ 0x7C, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0x7C, 0x00 },
-        'P' => .{ 0xFC, 0xC6, 0xC6, 0xFC, 0xC0, 0xC0, 0xC0, 0x00 },
-        'Q' => .{ 0x7C, 0xC6, 0xC6, 0xC6, 0xD6, 0xCC, 0x76, 0x00 },
-        'R' => .{ 0xFC, 0xC6, 0xC6, 0xFC, 0xD8, 0xCC, 0xC6, 0x00 },
-        'S' => .{ 0x7C, 0xC6, 0xC0, 0x7C, 0x06, 0xC6, 0x7C, 0x00 },
-        'T' => .{ 0xFE, 0x18, 0x18, 0x18, 0x18, 0x18, 0x18, 0x00 },
-        'U' => .{ 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0xC6, 0x7C, 0x00 },
-        'V' => .{ 0xC6, 0xC6, 0xC6, 0xC6, 0x6C, 0x38, 0x10, 0x00 },
-        'W' => .{ 0xC6, 0xC6, 0xC6, 0xD6, 0xFE, 0xEE, 0xC6, 0x00 },
-        'X' => .{ 0xC6, 0xC6, 0x6C, 0x38, 0x6C, 0xC6, 0xC6, 0x00 },
-        'Y' => .{ 0xC6, 0xC6, 0x6C, 0x38, 0x18, 0x18, 0x18, 0x00 },
-        'Z' => .{ 0xFE, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xFE, 0x00 },
-        'a' => .{ 0x00, 0x00, 0x7C, 0x06, 0x7E, 0xC6, 0x7E, 0x00 },
-        'b' => .{ 0xC0, 0xC0, 0xFC, 0xC6, 0xC6, 0xC6, 0xFC, 0x00 },
-        'c' => .{ 0x00, 0x00, 0x7C, 0xC6, 0xC0, 0xC6, 0x7C, 0x00 },
-        'd' => .{ 0x06, 0x06, 0x7E, 0xC6, 0xC6, 0xC6, 0x7E, 0x00 },
-        'e' => .{ 0x00, 0x00, 0x7C, 0xC6, 0xFE, 0xC0, 0x7C, 0x00 },
-        'f' => .{ 0x1C, 0x36, 0x30, 0x7C, 0x30, 0x30, 0x30, 0x00 },
-        'g' => .{ 0x00, 0x00, 0x7E, 0xC6, 0xC6, 0x7E, 0x06, 0x7C },
-        'h' => .{ 0xC0, 0xC0, 0xFC, 0xC6, 0xC6, 0xC6, 0xC6, 0x00 },
-        'i' => .{ 0x18, 0x00, 0x38, 0x18, 0x18, 0x18, 0x3C, 0x00 },
-        'j' => .{ 0x06, 0x00, 0x06, 0x06, 0x06, 0x06, 0xC6, 0x7C },
-        'k' => .{ 0xC0, 0xC0, 0xCC, 0xD8, 0xF0, 0xD8, 0xCC, 0x00 },
-        'l' => .{ 0x38, 0x18, 0x18, 0x18, 0x18, 0x18, 0x3C, 0x00 },
-        'm' => .{ 0x00, 0x00, 0xEC, 0xFE, 0xD6, 0xC6, 0xC6, 0x00 },
-        'n' => .{ 0x00, 0x00, 0xFC, 0xC6, 0xC6, 0xC6, 0xC6, 0x00 },
-        'o' => .{ 0x00, 0x00, 0x7C, 0xC6, 0xC6, 0xC6, 0x7C, 0x00 },
-        'p' => .{ 0x00, 0x00, 0xFC, 0xC6, 0xC6, 0xFC, 0xC0, 0xC0 },
-        'q' => .{ 0x00, 0x00, 0x7E, 0xC6, 0xC6, 0x7E, 0x06, 0x06 },
-        'r' => .{ 0x00, 0x00, 0xDC, 0xE6, 0xC0, 0xC0, 0xC0, 0x00 },
-        's' => .{ 0x00, 0x00, 0x7E, 0xC0, 0x7C, 0x06, 0xFC, 0x00 },
-        't' => .{ 0x30, 0x30, 0x7C, 0x30, 0x30, 0x36, 0x1C, 0x00 },
-        'u' => .{ 0x00, 0x00, 0xC6, 0xC6, 0xC6, 0xCE, 0x76, 0x00 },
-        'v' => .{ 0x00, 0x00, 0xC6, 0xC6, 0xC6, 0x6C, 0x38, 0x00 },
-        'w' => .{ 0x00, 0x00, 0xC6, 0xC6, 0xD6, 0xFE, 0x6C, 0x00 },
-        'x' => .{ 0x00, 0x00, 0xC6, 0x6C, 0x38, 0x6C, 0xC6, 0x00 },
-        'y' => .{ 0x00, 0x00, 0xC6, 0xC6, 0xCE, 0x76, 0x06, 0x7C },
-        'z' => .{ 0x00, 0x00, 0xFE, 0x0C, 0x38, 0x60, 0xFE, 0x00 },
-        '0' => .{ 0x7C, 0xC6, 0xCE, 0xD6, 0xE6, 0xC6, 0x7C, 0x00 },
-        '1' => .{ 0x18, 0x38, 0x18, 0x18, 0x18, 0x18, 0x7E, 0x00 },
-        '2' => .{ 0x7C, 0xC6, 0x06, 0x1C, 0x30, 0x60, 0xFE, 0x00 },
-        '3' => .{ 0x7C, 0xC6, 0x06, 0x3C, 0x06, 0xC6, 0x7C, 0x00 },
-        '4' => .{ 0x0C, 0x1C, 0x3C, 0x6C, 0xFE, 0x0C, 0x0C, 0x00 },
-        '5' => .{ 0xFE, 0xC0, 0xFC, 0x06, 0x06, 0xC6, 0x7C, 0x00 },
-        '6' => .{ 0x7C, 0xC6, 0xC0, 0xFC, 0xC6, 0xC6, 0x7C, 0x00 },
-        '7' => .{ 0xFE, 0x06, 0x0C, 0x18, 0x30, 0x60, 0xC0, 0x00 },
-        '8' => .{ 0x7C, 0xC6, 0xC6, 0x7C, 0xC6, 0xC6, 0x7C, 0x00 },
-        '9' => .{ 0x7C, 0xC6, 0xC6, 0x7E, 0x06, 0xC6, 0x7C, 0x00 },
-        ' ' => .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-        '.' => .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x00 },
-        ',' => .{ 0x00, 0x00, 0x00, 0x00, 0x18, 0x18, 0x30, 0x00 },
-        ':' => .{ 0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x00, 0x00 },
-        ';' => .{ 0x00, 0x18, 0x18, 0x00, 0x18, 0x18, 0x30, 0x00 },
-        '(' => .{ 0x0C, 0x18, 0x30, 0x30, 0x30, 0x18, 0x0C, 0x00 },
-        ')' => .{ 0x30, 0x18, 0x0C, 0x0C, 0x0C, 0x18, 0x30, 0x00 },
-        '[' => .{ 0x3C, 0x30, 0x30, 0x30, 0x30, 0x30, 0x3C, 0x00 },
-        ']' => .{ 0x3C, 0x0C, 0x0C, 0x0C, 0x0C, 0x0C, 0x3C, 0x00 },
-        '{' => .{ 0x1C, 0x30, 0x30, 0x60, 0x30, 0x30, 0x1C, 0x00 },
-        '}' => .{ 0x70, 0x30, 0x30, 0x1C, 0x30, 0x30, 0x70, 0x00 },
-        '+' => .{ 0x00, 0x18, 0x18, 0x7E, 0x18, 0x18, 0x00, 0x00 },
-        '-' => .{ 0x00, 0x00, 0x00, 0x7E, 0x00, 0x00, 0x00, 0x00 },
-        '*' => .{ 0x00, 0x66, 0x3C, 0x18, 0x3C, 0x66, 0x00, 0x00 },
-        '/' => .{ 0x02, 0x06, 0x0C, 0x18, 0x30, 0x60, 0x40, 0x00 },
-        '=' => .{ 0x00, 0x00, 0x7E, 0x00, 0x7E, 0x00, 0x00, 0x00 },
-        '!' => .{ 0x18, 0x18, 0x18, 0x18, 0x00, 0x00, 0x18, 0x00 },
-        '@' => .{ 0x7C, 0xC6, 0xDE, 0xAA, 0xBA, 0xC0, 0x7C, 0x00 },
-        '#' => .{ 0x36, 0x36, 0x7F, 0x36, 0x7F, 0x36, 0x36, 0x00 },
-        '$' => .{ 0x18, 0x3E, 0x60, 0x3C, 0x06, 0x7C, 0x18, 0x00 },
-        '_' => .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7E, 0x00 },
-        '<' => .{ 0x0C, 0x18, 0x30, 0x60, 0x30, 0x18, 0x0C, 0x00 },
-        '>' => .{ 0x30, 0x18, 0x0C, 0x06, 0x0C, 0x18, 0x30, 0x00 },
-        '?' => .{ 0x7C, 0xC6, 0x06, 0x1C, 0x18, 0x00, 0x18, 0x00 },
-        else => .{ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 },
-    };
-}

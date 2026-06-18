@@ -69,33 +69,48 @@ pub const Framebuffer = struct {
         }
     }
 
+    pub fn drawGlyphScaled(self: *Framebuffer, glyph: [8]u8, x: i32, y: i32, val: u32, scale: u32) void {
+        var gy: u32 = 0;
+        while (gy < 8) : (gy += 1) {
+            var gx: u32 = 0;
+            while (gx < 8) : (gx += 1) {
+                if ((glyph[gy] & (@as(u8, 1) << @intCast(7 - gx))) != 0) {
+                    const bx = x + @as(i32, @intCast(gx * scale));
+                    const by = y + @as(i32, @intCast(gy * scale));
+                    var sy: u32 = 0;
+                    while (sy < scale) : (sy += 1) {
+                        var sx: u32 = 0;
+                        while (sx < scale) : (sx += 1) {
+                            const px = bx + @as(i32, @intCast(sx));
+                            const py = by + @as(i32, @intCast(sy));
+                            if (px >= 0 and py >= 0 and px < @as(i32, @intCast(self.width)) and py < @as(i32, @intCast(self.height))) {
+                                self.pixels[@as(usize, @intCast(py)) * self.stride + @as(usize, @intCast(px))] = val;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     pub fn drawText(self: *Framebuffer, text: []const u8, x: i32, y: i32, c: Color, size: u32) void {
         const val = colorToU32(c);
+        const scale = if (size >= 8) @as(u32, @intCast(@divFloor(size, 8))) else 1;
+        const gs = scale * 8;
+        const advance = @as(i32, @intCast(gs + 2));
         var cx = x;
         var cy = y;
 
         for (text) |ch| {
             if (ch == '\n') {
-                cy += @as(i32, @intCast(size + 2));
+                cy += advance;
                 cx = x;
                 continue;
             }
 
             const glyph = getGlyph(ch);
-            var gy: u32 = 0;
-            while (gy < 8 and gy < size) : (gy += 1) {
-                var gx: u32 = 0;
-                while (gx < 8 and gx < size) : (gx += 1) {
-                    if ((glyph[gy] & (@as(u8, 1) << @intCast(gx))) != 0) {
-                        const px = cx + @as(i32, @intCast(gx));
-                        const py = cy + @as(i32, @intCast(gy));
-                        if (px >= 0 and py >= 0 and px < @as(i32, @intCast(self.width)) and py < @as(i32, @intCast(self.height))) {
-                            self.pixels[@as(usize, @intCast(py)) * self.stride + @as(usize, @intCast(px))] = val;
-                        }
-                    }
-                }
-            }
-            cx += @as(i32, @intCast(size));
+            self.drawGlyphScaled(glyph, cx, cy, val, scale);
+            cx += @as(i32, @intCast(gs));
         }
     }
 
@@ -105,7 +120,7 @@ pub const Framebuffer = struct {
     }
 };
 
-fn getGlyph(ch: u8) [8]u8 {
+pub fn getGlyph(ch: u8) [8]u8 {
     return switch (ch) {
         'A' => .{ 0x7C, 0xC6, 0xC6, 0xFE, 0xC6, 0xC6, 0xC6, 0x00 },
         'B' => .{ 0xFC, 0xC6, 0xC6, 0xFC, 0xC6, 0xC6, 0xFC, 0x00 },

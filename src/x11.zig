@@ -172,6 +172,16 @@ pub const X11Conn = struct {
         writeAll(self.fd, &buf);
     }
 
+    pub fn selectInput(self: *X11Conn, mask: u32) void {
+        var buf: [16]u8 = undefined;
+        buf[0] = 102; buf[1] = 0;
+        write16(&buf, 2, 4);
+        write32(&buf, 4, self.wid);
+        write32(&buf, 8, 0);
+        write32(&buf, 12, mask);
+        writeAll(self.fd, &buf);
+    }
+
     pub fn mapWindow(self: *X11Conn) void {
         var buf: [8]u8 = undefined;
         buf[0] = 8; buf[1] = 0;
@@ -180,22 +190,53 @@ pub const X11Conn = struct {
         writeAll(self.fd, &buf);
     }
 
-    pub fn setTitle(self: *X11Conn, title: []const u8) void {
-        const pad = (4 - (title.len % 4)) & 3;
-        var hdr: [28]u8 = undefined;
-        hdr[0] = 18; hdr[1] = 0;
-        write16(&hdr, 2, @as(u16, @intCast(7 + @as(u16, @intCast((title.len + pad) / 4)))));
-        write32(&hdr, 4, 0);
-        write32(&hdr, 8, self.wid);
-        write32(&hdr, 12, 39);
-        write32(&hdr, 16, 31);
-        write32(&hdr, 20, 8);
-        write32(&hdr, 24, @as(u32, @intCast(title.len)));
-        writeAll(self.fd, &hdr);
-        writeAll(self.fd, title);
+    fn internAtom(self: *X11Conn, name: []const u8) u32 {
+        const pad = (4 - (name.len % 4)) & 3;
+        const req_len: u16 = @as(u16, @intCast(2 + (name.len + pad) / 4));
+        var buf: [8]u8 = undefined;
+        buf[0] = 16; buf[1] = 0;
+        write16(&buf, 2, req_len);
+        write16(&buf, 4, @as(u16, @intCast(name.len)));
+        buf[6] = 0; buf[7] = 0;
+        writeAll(self.fd, &buf);
+        writeAll(self.fd, name);
         if (pad > 0) {
             var p: [4]u8 = undefined;
             writeAll(self.fd, p[0..pad]);
+        }
+        var resp: [8]u8 = undefined;
+        if (!readExact(self.fd, &resp)) return 0;
+        if (resp[0] != 1) return 0;
+        var reply: [24]u8 = undefined;
+        if (!readExact(self.fd, &reply)) return 0;
+        return read32(&reply, 4);
+    }
+
+    fn changeProp(self: *X11Conn, prop: u32, typ: u32, fmt: u8, data: []const u8) void {
+        const pad = (4 - (data.len % 4)) & 3;
+        const hdr_len: u16 = @as(u16, @intCast(6 + (data.len + pad) / 4));
+        var hdr: [24]u8 = undefined;
+        hdr[0] = 18; hdr[1] = 0;
+        write16(&hdr, 2, hdr_len);
+        write32(&hdr, 4, self.wid);
+        write32(&hdr, 8, prop);
+        write32(&hdr, 12, typ);
+        hdr[16] = fmt;
+        write32(&hdr, 20, @as(u32, @intCast(data.len)));
+        writeAll(self.fd, &hdr);
+        writeAll(self.fd, data);
+        if (pad > 0) {
+            var p: [4]u8 = undefined;
+            writeAll(self.fd, p[0..pad]);
+        }
+    }
+
+    pub fn setTitle(self: *X11Conn, title: []const u8) void {
+        self.changeProp(39, 31, 8, title);
+        const net_wm_name = self.internAtom("_NET_WM_NAME");
+        if (net_wm_name != 0) {
+            const utf8_str = self.internAtom("UTF8_STRING");
+            if (utf8_str != 0) self.changeProp(net_wm_name, utf8_str, 8, title);
         }
     }
 
@@ -251,10 +292,12 @@ pub const X11Conn = struct {
         var buf: [32]u8 = undefined;
         if (!readExact(self.fd, &buf)) return null;
         const t = buf[0];
-        if (t == 12) return XEvent{ .type = 12, .keycode = 0, .width = read16(&buf, 4), .height = read16(&buf, 6) };
-        if (t == 2) return XEvent{ .type = 2, .keycode = buf[1], .width = 0, .height = 0 };
-        if (t == 3) return XEvent{ .type = 3, .keycode = buf[1], .width = 0, .height = 0 };
-        if (t == 33) return XEvent{ .type = 33, .keycode = 0, .width = 0, .height = 0 };
+        if (t == 12) return XEvent{ .type = 12, .keycode = 0, .width = read16(&buf, 4), .height = read16(&buf, 6), .detail = 0, .event_x = 0, .event_y = 0 };
+        if (t == 2) return XEvent{ .type = 2, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
+        if (t == 3) return XEvent{ .type = 3, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
+        if (t == 33) return XEvent{ .type = 33, .keycode = 0, .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
+        if (t == 4 or t == 5) return XEvent{ .type = t, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 4), .event_y = readI16(&buf, 6) };
+        if (t == 6) return XEvent{ .type = 6, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 4), .event_y = readI16(&buf, 6) };
         return null;
     }
 
@@ -268,7 +311,14 @@ pub const XEvent = struct {
     keycode: u32,
     width: u32,
     height: u32,
+    detail: u8,
+    event_x: i32,
+    event_y: i32,
 };
+
+fn readI16(buf: []const u8, off: usize) i16 {
+    return @as(i16, @bitCast(@as(u16, read16(buf, off))));
+}
 
 pub fn x11Open(display_num: i32) ?X11Conn {
     var path: [32]u8 = undefined;
@@ -345,7 +395,7 @@ pub fn x11Open(display_num: i32) ?X11Conn {
     const vendor_len = read16(&data, 16);
     const num_formats = data[21];
 
-    var off: usize = 44;
+    var off: usize = 32;
     off += @as(usize, vendor_len);
     off = (off + 3) & ~@as(usize, 3);
     off += @as(usize, num_formats) * 8;

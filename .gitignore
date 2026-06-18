@@ -1,6 +1,8 @@
 .zig-cache/
 zig-out/
-out.asm
-out.bin
-out_arm64.bin
+output/
 *.ppm
+x11test
+dhjsjs
+dhjsjs.o
+new/

@@ -10,10 +10,6 @@ pub const CodeBuffer = struct {
         return self.buf[0..self.pos];
     }
 
-    pub fn getMut(self: *CodeBuffer) []u8 {
-        return self.buf[0..self.pos];
-    }
-
     pub fn byte(self: *CodeBuffer, b: u8) void {
         if (self.pos < self.buf.len) { self.buf[self.pos] = b; self.pos += 1; }
     }
@@ -35,22 +31,192 @@ pub const CodeBuffer = struct {
         self.dword(@as(u32, @truncate(qw >> 32)));
     }
 
-    pub fn modrm(self: *CodeBuffer, mod: u8, reg: u8, rm: u8) void {
-        self.byte((mod << 6) | ((reg & 7) << 3) | (rm & 7));
+    pub fn modrm(self: *CodeBuffer, mod_: u8, reg: u8, rm: u8) void {
+        self.byte((mod_ << 6) | ((reg & 7) << 3) | (rm & 7));
     }
 
-    pub fn movRImm64(self: *CodeBuffer, reg: u8, val: u64) void {
-        var r = reg;
-        if (r >= 8) { self.byte(0x49); r -= 8; } else { self.byte(0x48); }
+    pub fn rex_w(self: *CodeBuffer, r: u8, x: u8, b: u8) void {
+        self.byte(0x48 | (r << 2) | (x << 1) | b);
+    }
+
+    pub fn rex_wb(self: *CodeBuffer, r: u8, b: u8) void {
+        self.rex_w(r, 0, b);
+    }
+
+    fn rex_if(self: *CodeBuffer, r: u8, rm: u8) void {
+        if (r >= 8 or rm >= 8) self.rex_wb(if (r >= 8) 1 else 0, if (rm >= 8) 1 else 0);
+    }
+
+    pub fn pushR(self: *CodeBuffer, r: u8) void {
+        if (r >= 8) { self.byte(0x41); self.byte(0x50 | (r & 7)); }
+        else { self.byte(0x50 | r); }
+    }
+
+    pub fn popR(self: *CodeBuffer, r: u8) void {
+        if (r >= 8) { self.byte(0x41); self.byte(0x58 | (r & 7)); }
+        else { self.byte(0x58 | r); }
+    }
+
+    pub fn movRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        if (dst == src) return;
+        self.rex_w(@as(u8, @intCast(src >> 3)), 0, @as(u8, @intCast(dst >> 3)));
+        self.byte(0x89);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn movRImm64(self: *CodeBuffer, r: u8, val: u64) void {
+        self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
         self.byte(0xB8 | (r & 7));
         self.qword(val);
     }
 
+    pub fn movRImm32(self: *CodeBuffer, r: u8, val: u32) void {
+        if (r >= 8) self.byte(0x41);
+        self.byte(0xB8 | (r & 7));
+        self.dword(val);
+    }
+
+    pub fn movRMem64(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
+        self.rex_w(@as(u8, @intCast(r >> 3)), 0, @as(u8, @intCast(base >> 3)));
+        self.byte(0x8B);
+        if (off == 0) {
+            self.modrm(0, r, base);
+        } else if (off >= -128 and off <= 127) {
+            self.modrm(1, r, base);
+        } else {
+            self.modrm(2, r, base);
+        }
+        if (base == RSP or base == R12) self.byte(0x24);
+        if (off >= -128 and off <= 127 and off != 0) {
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
+        } else if (off != 0) {
+            self.dword(@as(u32, @bitCast(off)));
+        }
+    }
+
+    pub fn movMemR64(self: *CodeBuffer, base: u8, off: i32, r: u8) void {
+        self.rex_w(@as(u8, @intCast(r >> 3)), 0, @as(u8, @intCast(base >> 3)));
+        self.byte(0x89);
+        if (off == 0) {
+            self.modrm(0, r, base);
+        } else if (off >= -128 and off <= 127) {
+            self.modrm(1, r, base);
+        } else {
+            self.modrm(2, r, base);
+        }
+        if (base == RSP or base == R12) self.byte(0x24);
+        if (off >= -128 and off <= 127 and off != 0) {
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
+        } else if (off != 0) {
+            self.dword(@as(u32, @bitCast(off)));
+        }
+    }
+
+    pub fn movRAReg(self: *CodeBuffer, r: u8, addr: u32) void {
+        self.byte(0x48 | (if (r >= 8) 1 else 0));
+        self.byte(0xA1);
+        self.qword(addr);
+    }
+
+    pub fn addRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        self.rex_if(dst, src);
+        self.byte(0x01);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn subRR(self: *CodeBuffer, dst: u8, src: u8) void {
+        self.rex_if(dst, src);
+        self.byte(0x29);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn addRImm32(self: *CodeBuffer, r: u8, val: i32) void {
+        if (val >= -128 and val <= 127) {
+            self.rex_if(r, 0);
+            self.byte(0x83);
+            self.modrm(3, 0, r);
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
+        } else {
+            self.rex_if(r, 0);
+            self.byte(0x81);
+            self.modrm(3, 0, r);
+            self.dword(@as(u32, @bitCast(val)));
+        }
+    }
+
+    pub fn subRImm32(self: *CodeBuffer, r: u8, val: i32) void {
+        if (val >= -128 and val <= 127) {
+            self.rex_if(r, 0);
+            self.byte(0x83);
+            self.modrm(3, 5, r);
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
+        } else {
+            self.rex_if(r, 0);
+            self.byte(0x81);
+            self.modrm(3, 5, r);
+            self.dword(@as(u32, @bitCast(val)));
+        }
+    }
+
     pub fn xorRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        var d = dst; var s = src;
-        if (d >= 8 or s >= 8) { self.byte(if (d >= 8) 0x4D else 0x49); d &= 7; s &= 7; } else { self.byte(0x48); }
+        self.rex_if(dst, src);
         self.byte(0x31);
-        self.modrm(3, s & 7, d & 7);
+        self.modrm(3, src, dst);
+    }
+
+    pub fn cmpRImm32(self: *CodeBuffer, r: u8, val: i32) void {
+        if (val >= -128 and val <= 127) {
+            self.rex_if(r, 0);
+            self.byte(0x83);
+            self.modrm(3, 7, r);
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
+        } else {
+            self.rex_if(r, 0);
+            self.byte(0x81);
+            self.modrm(3, 7, r);
+            self.dword(@as(u32, @bitCast(val)));
+        }
+    }
+
+    pub fn cmpRR(self: *CodeBuffer, a: u8, b: u8) void {
+        self.rex_if(b, a);
+        self.byte(0x39);
+        self.modrm(3, b, a);
+    }
+
+    pub fn jmpRel32(self: *CodeBuffer, off: i32) void {
+        self.byte(0xE9);
+        self.dword(@as(u32, @bitCast(off)));
+    }
+
+    pub fn jmpRel8(self: *CodeBuffer, off: i8) void {
+        self.byte(0xEB);
+        self.byte(@as(u8, @bitCast(off)));
+    }
+
+    fn jcc32(self: *CodeBuffer, cc: u8, off: i32) void {
+        self.byte(0x0F);
+        self.byte(0x80 | cc);
+        self.dword(@as(u32, @bitCast(off)));
+    }
+
+    fn jcc8(self: *CodeBuffer, cc: u8, off: i8) void {
+        self.byte(0x70 | cc);
+        self.byte(@as(u8, @bitCast(off)));
+    }
+
+    pub fn jeRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x04, off); }
+    pub fn jneRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x05, off); }
+    pub fn jlRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x0C, off); }
+    pub fn jleRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x0E, off); }
+    pub fn jgRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x0F, off); }
+    pub fn jgeRel32(self: *CodeBuffer, off: i32) void { self.jcc32(0x0D, off); }
+    pub fn jeRel8(self: *CodeBuffer, off: i8) void { self.jcc8(0x04, off); }
+    pub fn jneRel8(self: *CodeBuffer, off: i8) void { self.jcc8(0x05, off); }
+
+    pub fn callRel32(self: *CodeBuffer, off: i32) void {
+        self.byte(0xE8);
+        self.dword(@as(u32, @bitCast(off)));
     }
 
     pub fn syscall(self: *CodeBuffer) void {
@@ -62,11 +228,67 @@ pub const CodeBuffer = struct {
         self.byte(0xC3);
     }
 
-    pub fn movRImm32(self: *CodeBuffer, reg: u8, val: u32) void {
-        var r = reg;
-        if (r >= 8) { self.byte(0x41); r -= 8; } else { self.byte(0x48); }
-        self.byte(0xB8 | (r & 7));
-        self.dword(val);
+    pub fn leaRMem(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
+        if (off == 0) {
+            self.rex_if(r, base);
+            self.byte(0x8D);
+            self.modrm(0, r, base);
+            if (base == RSP or base == R12) self.byte(0x24);
+        } else if (off >= -128 and off <= 127) {
+            self.rex_if(r, base);
+            self.byte(0x8D);
+            self.modrm(1, r, base);
+            if (base == RSP or base == R12) self.byte(0x24);
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
+        } else {
+            self.rex_if(r, base);
+            self.byte(0x8D);
+            self.modrm(2, r, base);
+            if (base == RSP or base == R12) self.byte(0x24);
+            self.dword(@as(u32, @bitCast(off)));
+        }
+    }
+
+    pub fn buildElf64(self: *CodeBuffer) void {
+        const code_len = self.pos;
+        const entry_off: u64 = 64 + 56;
+        const code_align: usize = 4096;
+        const code_sz = ((code_len + code_align - 1) / code_align) * code_align;
+
+        var code_copy: [65536]u8 = undefined;
+        var ci: usize = 0;
+        while (ci < code_len) : (ci += 1) code_copy[ci] = self.buf[ci];
+
+        self.pos = 0;
+        self.byte(0x7F); self.byte('E'); self.byte('L'); self.byte('F');
+        self.byte(2); self.byte(1); self.byte(1); self.byte(0);
+        self.qword(0);
+        self.word(2);
+        self.word(0x3E);
+        self.dword(1);
+        self.qword(0x400000 + entry_off);
+        self.qword(64);
+        self.qword(0);
+        self.dword(0);
+        self.word(64);
+        self.word(56);
+        self.word(1);
+        self.word(0);
+        self.word(0);
+        self.word(0);
+
+        self.dword(1);
+        self.dword(7);
+        self.qword(0);
+        self.qword(0x400000);
+        self.qword(0x400000);
+        self.qword(code_sz);
+        self.qword(code_sz);
+        self.qword(code_align);
+
+        ci = 0;
+        while (ci < code_len) : (ci += 1) self.byte(code_copy[ci]);
+        while (self.pos < 64 + 56 + code_sz) : (self.pos += 1) self.buf[self.pos] = 0;
     }
 };
 
@@ -86,44 +308,3 @@ pub const R12: u8 = 12;
 pub const R13: u8 = 13;
 pub const R14: u8 = 14;
 pub const R15: u8 = 15;
-
-pub fn buildElf64(cb: *CodeBuffer) void {
-    const code = cb.get();
-    const entry_off = @as(u64, @intCast(64 + 56));
-    const code_align: usize = 4096;
-    const code_sz = ((code.len + code_align - 1) / code_align) * code_align;
-
-    cb.pos = 0;
-    // ELF header (64 bytes)
-    cb.byte(0x7F); cb.byte('E'); cb.byte('L'); cb.byte('F');
-    cb.byte(2); cb.byte(1); cb.byte(1); cb.byte(0);
-    cb.qword(0); // padding
-    cb.word(2); // ET_EXEC
-    cb.word(0x3E); // x86_64
-    cb.dword(1);
-    cb.qword(0x400000 + entry_off); // entry
-    cb.qword(64); // phoff
-    cb.qword(0); // shoff
-    cb.dword(0);
-    cb.word(64);
-    cb.word(56);
-    cb.word(1);
-    cb.word(0);
-    cb.word(0);
-    cb.word(0);
-
-    // PHDR (56 bytes)
-    cb.dword(1); // PT_LOAD
-    cb.dword(7); // flags
-    cb.qword(0); // offset
-    cb.qword(0x400000); // vaddr
-    cb.qword(0x400000); // paddr
-    cb.qword(@as(u64, @intCast(code_sz))); // filesz
-    cb.qword(@as(u64, @intCast(code_sz))); // memsz
-    cb.qword(code_align); // align
-
-    // Code
-    var i: usize = 0;
-    while (i < code.len) : (i += 1) cb.byte(code[i]);
-    while (cb.pos < 64 + 56 + code_sz) : (cb.pos += 1) cb.buf[cb.pos] = 0;
-}

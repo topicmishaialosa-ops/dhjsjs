@@ -1,41 +1,21 @@
 const sys = @import("sys.zig");
 const gfx = @import("render.zig");
 const ide_mod = @import("ide.zig");
-const lexer_mod = @import("lexer.zig");
 const parser_mod = @import("parser.zig");
 const compiler_mod = @import("compiler.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const x11_mod = @import("x11.zig");
 const wl_mod = @import("wayland.zig");
+const tty_mod = @import("tty.zig");
 
-const WIDTH: u32 = 800;
-const HEIGHT: u32 = 600;
-
-const MODE_X11: u8 = 1;
-const MODE_FBDEV: u8 = 2;
-const MODE_PPM: u8 = 3;
-const MODE_WAYLAND: u8 = 10;
-
-fn savePpm(fb: *gfx.Framebuffer, path: [*]const u8) void {
-    const fd = sys.open(path, sys.O_RDWR | 0x40 | 0x200, 0x1A4);
-    if (fd < 0) return;
-    const hs = "P6\n800 600\n255\n";
-    _ = sys.write(fd, @as([*]const u8, @ptrCast(&hs)), 14);
-    const total = @as(usize, fb.stride) * fb.height;
-    var pi: usize = 0;
-    while (pi < total) : (pi += 1) {
-        const px = fb.pixels[pi];
-        const rgb = [_]u8{ @as(u8, @intCast((px >> 16) & 0xFF)), @as(u8, @intCast((px >> 8) & 0xFF)), @as(u8, @intCast(px & 0xFF)) };
-        _ = sys.write(fd, &rgb, 3);
-    }
-    sys.close(fd);
-}
+var WIDTH: u32 = 800;
+var HEIGHT: u32 = 600;
 
 fn writeFile(path: [*]const u8, data: []const u8) void {
     const fd = sys.open(path, sys.O_RDWR | 0x40 | 0x200, 0x1A4);
     if (fd < 0) return;
-    _ = sys.write(fd, @as([*]const u8, @ptrCast(&data[0])), data.len);
+    _ = sys.write(fd, data.ptr, data.len);
     sys.close(fd);
 }
 
@@ -70,74 +50,175 @@ fn kcUpper(kc: u8) u8 {
 }
 
 fn buildProject(ide: *ide_mod.IdeState) void {
+    _ = sys.mkdir("output\x00", 0x1C0);
+
     const src = ide.content[0..ide.clen];
-    var lex = lexer_mod.Lexer.init(@as([*]const u8, @ptrCast(&src[0])), src.len);
-    while (true) { const t = lex.next(); if (t.kind == .eof) break; }
-    var parser = parser_mod.Parser.init(@as([*]const u8, @ptrCast(&src[0])), src.len);
+    var parser = parser_mod.Parser.init(src.ptr, src.len);
     _ = parser.parse();
+
     var cgen = compiler_mod.Compiler.init(&parser.pool);
     cgen.compileAsm();
-    writeFile("/home/krasava2/dhjsjs/out.asm\x00", cgen.getOutput());
+    writeFile("output/out.asm\x00", cgen.getOutput());
 
     var cb = codegen_mod.CodeBuffer.init();
     cb.movRImm64(codegen_mod.RAX, 60);
     cb.xorRR(codegen_mod.RDI, codegen_mod.RDI);
     cb.syscall();
     codegen_mod.buildElf64(&cb);
-    writeFile("/home/krasava2/dhjsjs/out.bin\x00", cb.get());
+    writeFile("output/out.bin\x00", cb.get());
 
     var cb_arm = codegen_arm.CodeBuffer.init();
     cb_arm.movRImm64(codegen_arm.X0, 93);
     cb_arm.movRImm64(codegen_arm.X8, 93);
     cb_arm.svc(0);
     cb_arm.buildElf64();
-    writeFile("/home/krasava2/dhjsjs/out_arm64.bin\x00", cb_arm.get());
+    writeFile("output/out_arm64.bin\x00", cb_arm.get());
 
     ide.setStatus("built: x86_64 ELF + ARM64 ELF");
+    ide.addConsole("Build OK: output/out.bin (x86) + out_arm64.bin (ARM)\n");
+}
+
+fn parseEnv() void {
+    var buf: [16]u8 = undefined;
+    if (sys.getenv("DHJSJS_W", &buf)) |v| {
+        var n: u32 = 0;
+        for (v) |c| { if (c >= '0' and c <= '9') n = n * 10 + (c - '0'); }
+        if (n > 0) WIDTH = n;
+    }
+    if (sys.getenv("DHJSJS_H", &buf)) |v| {
+        var n: u32 = 0;
+        for (v) |c| { if (c >= '0' and c <= '9') n = n * 10 + (c - '0'); }
+        if (n > 0) HEIGHT = n;
+    }
+}
+
+fn ttyMain(ide: *ide_mod.IdeState) void {
+    var tty = tty_mod.TtyRender.init();
+    tty.detectSize();
+
+    var home_buf: [256]u8 = undefined;
+    if (sys.getenv("HOME", &home_buf)) |home| {
+        var pp: usize = 0;
+        while (pp < ide.flen and pp < 255) : (pp += 1) {}
+        if (pp == 0) {
+            var fi: usize = 0;
+            while (fi < home.len and fi < 200) : (fi += 1) ide.filename[fi] = home[fi];
+            ide.filename[home.len] = '/';
+            const def = "dhjsjs_code.txt";
+            var di: usize = 0;
+            while (di < def.len) : (di += 1) ide.filename[home.len + 1 + di] = def[di];
+            ide.flen = home.len + 1 + def.len;
+        }
+    }
+
+    const orig = (sys.setRawMode(sys.STDIN)) orelse {
+        tty.paint(ide);
+        _ = sys.read(sys.STDIN, @as([*]u8, undefined), 0);
+        return;
+    };
+    defer sys.restoreMode(sys.STDIN, &orig);
+    tty.clearScreen();
+
+    var running = true;
+
+    while (running) {
+        tty.paint(ide);
+
+        var buf: [16]u8 = undefined;
+        const n = sys.read(sys.STDIN, &buf, 16);
+        if (n <= 0) break;
+
+        var i: usize = 0;
+        while (i < @as(usize, @intCast(n))) : (i += 1) {
+            const ch = buf[i];
+            if (ch == 27) {
+                if (ide.input_mode) {
+                    ide.cancelInput();
+                } else if (i + 2 < @as(usize, @intCast(n))) {
+                    if (buf[i + 1] == '[') {
+                        const c = buf[i + 2];
+                        if (c == 'A') { ide.cursorUp(); i += 2; }
+                        if (c == 'B') { ide.cursorDown(); i += 2; }
+                        if (c == 'C') { ide.cursorRight(); i += 2; }
+                        if (c == 'D') { ide.cursorLeft(); i += 2; }
+                        if (c == 'H') { ide.cursorHome(); i += 2; }
+                        if (c == 'F') { ide.cursorEnd(); i += 2; }
+                    }
+                    if (buf[i + 1] == '1' and i + 3 < @as(usize, @intCast(n)) and buf[i + 2] == '5' and buf[i + 3] == '~') {
+                        buildProject(ide); i += 3;
+                    }
+                }
+            } else if (ch == 127 or ch == 8) {
+                ide.deleteChar();
+            } else if (ch == '\r' or ch == '\n') {
+                ide.insertChar('\n');
+            } else if (ch == '\t') {
+                ide.insertChar('\t');
+            } else if (ch == 3) {
+                running = false;
+                break;
+            } else if (ch == 19) {
+                if (ide.flen > 0) ide.saveFile();
+            } else if (ch == 15) {
+                ide.startInput("open");
+            } else if (ch >= 32 and ch < 127) {
+                ide.insertChar(ch);
+            }
+        }
+    }
+    tty.deinit();
 }
 
 pub fn main() void {
-    var fb = (gfx.Framebuffer.init(WIDTH, HEIGHT)) orelse {
-        sys.writeStr(2, "Failed to init framebuffer\n", 28);
-        sys.exit(1);
-    };
-    defer fb.deinit();
-
-    var ide = ide_mod.IdeState.init();
-    const source = "fn main() {\n    let x = 42;\n    let name = \"dhjsjs\";\n    return x;\n}\n\n/* Ctrl+S save | Ctrl+O open | F5 build */\n";
-    ide.setContent(source);
-    ide.setStatus("F5 build | arrows | Esc exit");
+    parseEnv();
 
     var xconn: x11_mod.X11Conn = undefined;
     var wlconn: wl_mod.WlConn = undefined;
     var have_x11 = false;
     var have_wl = false;
 
-    const conn = x11_mod.x11Open(0);
-    if (conn) |c| {
+    const x11_avail = x11_mod.x11Open(0);
+    if (x11_avail) |c| {
         xconn = c;
         have_x11 = true;
-        xconn.createWindow(0, 0, @as(u16, @intCast(WIDTH)), @as(u16, @intCast(HEIGHT)));
-        xconn.setTitle("dhjsjs IDE");
-        xconn.createGC();
-        xconn.mapWindow();
     }
-    if (!have_x11) {
-        const wmo = wl_mod.WlConn.open(0);
-        if (wmo) |c| {
+
+    if (!have_x11 or WIDTH > 800 or HEIGHT > 600) {
+        const wl = wl_mod.WlConn.open(0);
+        if (wl) |c| {
             wlconn = c;
-            if (wlconn.createSurface(WIDTH, HEIGHT)) {
-                have_wl = true;
-            }
+            have_wl = wlconn.createSurface(WIDTH, HEIGHT);
         }
     }
 
-    var running = true;
-    var shift = false;
-    var filepath_buf: [256]u8 = undefined;
-    var filepath_len: usize = 0;
-
     if (have_x11) {
+        var fb = (gfx.Framebuffer.init(WIDTH, HEIGHT)) orelse {
+            sys.writeStr(2, "Failed to init framebuffer\n", 28);
+            sys.exit(1);
+        };
+        defer fb.deinit();
+
+        var ide = ide_mod.IdeState.init();
+        const source = 
+        \\fn main() {
+        \\    let x = 42;
+        \\    let name = "dhjsjs";
+        \\    return x;
+        \\}
+        ;
+        ide.setContent(source);
+        ide.addConsole("dhjsjs IDE ready  |  F5=Build  Ctrl+S=Save  Ctrl+O=Open\n");
+
+        xconn.createWindow(0, 0, @as(u16, @intCast(WIDTH)), @as(u16, @intCast(HEIGHT)));
+        xconn.setTitle("dhjsjs IDE");
+        xconn.createGC();
+        xconn.selectInput(2 | 2048 | 16 | 32 | 64);
+        xconn.mapWindow();
+
+        var running = true;
+        var shift = false;
+        var ctrl = false;
+
         while (running) {
             ide.paint(&fb);
             xconn.putImage(fb.pixels, WIDTH, HEIGHT);
@@ -150,33 +231,73 @@ pub fn main() void {
                 if (xconn.nextEvent()) |e| {
                     if (e.type == 2) {
                         const k = @as(u8, @intCast(e.keycode));
-                        if (k == 9) { running = false; break; }
-                        if (k == 22 or k == 119) ide.deleteChar();
-                        if (k == 36) ide.insertChar('\n');
-                        if (k == 65) ide.insertChar(' ');
-                        if (k == 23) ide.insertChar('\t');
-                        if (k == 111) ide.cursorUp();
-                        if (k == 116) ide.cursorDown();
-                        if (k == 113) ide.cursorLeft();
-                        if (k == 114) ide.cursorRight();
-                        if (k == 97) ide.cursorHome();
-                        if (k == 103) ide.cursorEnd();
-                        if (k == 50 or k == 62) shift = true;
-                        if (k == 77) buildProject(&ide);
-                        if (k == 37 and shift) { if (ide.flen > 0) ide.saveFile(); }
-                        if (k == 32 and shift) { if (filepath_len > 0) { ide.openFile(filepath_buf[0..filepath_len]); filepath_len = 0; } }
-                        const ch = if (shift) kcUpper(k) else kcLower(k);
-                        if (ch >= ' ' and ch <= '~') ide.insertChar(ch);
+
+                        if (ide.input_mode) {
+                            if (k == 9) { ide.cancelInput(); }
+                            else if (k == 22 or k == 119) { ide.deleteChar(); }
+                            else if (k == 36) { ide.insertChar('\n'); }
+                            else {
+                                const chh = if (shift) kcUpper(k) else kcLower(k);
+                                if (chh >= ' ' and chh <= '~') ide.insertChar(chh);
+                            }
+                        } else {
+                            if (k == 9) { running = false; break; }
+                            if (k == 22 or k == 119) { ide.deleteChar(); }
+                            else if (k == 36) { ide.insertChar('\n'); }
+                            else if (k == 65) { ide.insertChar(' '); }
+                            else if (k == 23) { ide.insertChar('\t'); }
+                            else if (k == 111) { ide.cursorUp(); }
+                            else if (k == 116) { ide.cursorDown(); }
+                            else if (k == 113) { ide.cursorLeft(); }
+                            else if (k == 114) { ide.cursorRight(); }
+                            else if (k == 97) { ide.cursorHome(); }
+                            else if (k == 103) { ide.cursorEnd(); }
+                            else if (k == 37) { ctrl = true; }
+                            else if (k == 109) { ctrl = true; }
+                            else if (k == 50 or k == 62) { shift = true; }
+                            else if (k == 77) { buildProject(&ide); }
+                            else if (k == 39 and ctrl) { if (ide.flen > 0) ide.saveFile(); }
+                            else if (k == 32 and ctrl) { ide.startInput("open"); }
+                            else {
+                                const chh = if (shift) kcUpper(k) else kcLower(k);
+                                if (!ctrl and chh >= ' ' and chh <= '~') ide.insertChar(chh);
+                            }
+                        }
                     }
-                    if (e.type == 3) shift = false;
+                    if (e.type == 3) { shift = false; ctrl = false; }
+                    if (e.type == 4) {
+                        if (e.detail == 1) {
+                            ide.handleMouseClick(@as(i32, e.event_x), @as(i32, e.event_y), WIDTH, HEIGHT);
+                            if (ide.request_build) {
+                                ide.request_build = false;
+                                buildProject(&ide);
+                            }
+                        }
+                    }
                     if (e.type == 33) { running = false; break; }
-                    if (e.type == 12) {}
                 }
             }
         }
         xconn.close();
     } else if (have_wl) {
-        while (running) {
+        var fb = (gfx.Framebuffer.init(WIDTH, HEIGHT)) orelse {
+            sys.writeStr(2, "Failed to init framebuffer\n", 28);
+            sys.exit(1);
+        };
+        defer fb.deinit();
+
+        var ide = ide_mod.IdeState.init();
+        const source =
+        \\fn main() {
+        \\    let x = 42;
+        \\    let name = "dhjsjs";
+        \\    return x;
+        \\}
+        ;
+        ide.setContent(source);
+        ide.addConsole("dhjsjs IDE ready  |  F5=Build  Ctrl+S=Save  Ctrl+O=Open\n");
+
+        while (true) {
             ide.paint(&fb);
             wlconn.putImage(fb.pixels, WIDTH, HEIGHT);
             wlconn.commit();
@@ -191,24 +312,17 @@ pub fn main() void {
         }
         wlconn.close();
     } else {
-        const ffd = sys.open("/dev/fb0\x00", sys.O_RDWR, 0);
-        if (ffd >= 0) {
-            sys.close(ffd);
-            const sz = @as(usize, WIDTH) * @as(usize, HEIGHT) * 4;
-            const ff = sys.open("/dev/fb0\x00", sys.O_RDWR, 0);
-            if (ff >= 0) {
-                const p = sys.mmap(null, sz, sys.PROT_READ | sys.PROT_WRITE, sys.MAP_SHARED, ff, 0);
-                if (p) |rp| {
-                    const d = @as([*]u8, @ptrCast(rp));
-                    const s = @as([*]u8, @ptrCast(fb.pixels));
-                    var i: usize = 0; while (i < sz) : (i += 1) d[i] = s[i];
-                    sys.munmap(rp, sz);
-                }
-                sys.close(ff);
-            }
-        }
-        ide.paint(&fb);
-        savePpm(&fb, "/home/krasava2/dhjsjs.ppm\x00");
+        var ide = ide_mod.IdeState.init();
+        const source =
+        \\fn main() {
+        \\    let x = 42;
+        \\    let name = "dhjsjs";
+        \\    return x;
+        \\}
+        ;
+        ide.setContent(source);
+        ide.addConsole("dhjsjs IDE ready  |  F5=Build  Ctrl+S=Save  Ctrl+O=Open\n");
+        ttyMain(&ide);
     }
 
     sys.exit(0);

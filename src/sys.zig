@@ -2,32 +2,44 @@ pub const SYS_FTRUNCATE: usize = 77;
 pub const SYS_MEMFD_CREATE: usize = 438;
 
 pub fn syscall3(nr: usize, a1: usize, a2: usize, a3: usize) usize {
-    return asm volatile ("syscall"
-        : [r] "={rax}" (-> usize),
+    var r: usize = undefined;
+    asm volatile ("syscall"
+        : [r] "={rax}" (r),
         : [n] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2), [a3] "{rdx}" (a3),
-        : .{ .rcx = true, .r11 = true, .memory = true });
+        : .{ .rcx = true, .r11 = true, .memory = true }
+    );
+    return r;
 }
 
 pub fn syscall2(nr: usize, a1: usize, a2: usize) usize {
-    return asm volatile ("syscall"
-        : [r] "={rax}" (-> usize),
+    var r: usize = undefined;
+    asm volatile ("syscall"
+        : [r] "={rax}" (r),
         : [n] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2),
-        : .{ .rcx = true, .r11 = true, .memory = true });
+        : .{ .rcx = true, .r11 = true, .memory = true }
+    );
+    return r;
 }
 
 pub fn syscall1(nr: usize, a1: usize) usize {
-    return asm volatile ("syscall"
-        : [r] "={rax}" (-> usize),
+    var r: usize = undefined;
+    asm volatile ("syscall"
+        : [r] "={rax}" (r),
         : [n] "{rax}" (nr), [a1] "{rdi}" (a1),
-        : .{ .rcx = true, .r11 = true, .memory = true });
+        : .{ .rcx = true, .r11 = true, .memory = true }
+    );
+    return r;
 }
 
 pub fn syscall6(nr: usize, a1: usize, a2: usize, a3: usize, a4: usize, a5: usize, a6: usize) usize {
-    return asm volatile ("syscall"
-        : [r] "={rax}" (-> usize),
+    var r: usize = undefined;
+    asm volatile ("syscall"
+        : [r] "={rax}" (r),
         : [n] "{rax}" (nr), [a1] "{rdi}" (a1), [a2] "{rsi}" (a2), [a3] "{rdx}" (a3),
           [a4] "{r10}" (a4), [a5] "{r8}" (a5), [a6] "{r9}" (a6),
-        : .{ .rcx = true, .r11 = true, .memory = true });
+        : .{ .rcx = true, .r11 = true, .memory = true }
+    );
+    return r;
 }
 
 const SYS_READ: usize = 0;
@@ -110,6 +122,74 @@ pub fn mmap(addr: ?*anyopaque, len: usize, prot: i32, flags: i32, fd: i32, off: 
 
 pub fn munmap(addr: *anyopaque, len: usize) void {
     _ = syscall2(SYS_MUNMAP, @intFromPtr(addr), len);
+}
+
+pub fn mkdir(path: [*]const u8, mode: i32) i32 {
+    return @as(i32, @intCast(@as(isize, @bitCast(syscall2(83, @intFromPtr(path), @as(usize, @bitCast(@as(isize, mode))))))));
+}
+
+pub const TIOCGWINSZ: usize = 0x5413;
+pub const TCGETS: usize = 0x5401;
+pub const TCSETS: usize = 0x5402;
+pub const ECHO: u32 = 0x0008;
+pub const ICANON: u32 = 0x0002;
+pub const ISIG: u32 = 0x0001;
+pub const ICANON_OFF: u32 = 0xFFFD;
+pub const ECHO_OFF: u32 = 0xFFF7;
+pub const ISIG_OFF: u32 = 0xFFFE;
+pub const STDIN: i32 = 0;
+pub const STDOUT: i32 = 1;
+pub const VMIN: usize = 6;
+pub const VTIME: usize = 5;
+
+pub const Termios = struct {
+    iflag: u32,
+    oflag: u32,
+    cflag: u32,
+    lflag: u32,
+    cc: [19]u8,
+};
+
+pub const Winsize = struct {
+    ws_row: u16,
+    ws_col: u16,
+    ws_xpixel: u16,
+    ws_ypixel: u16,
+};
+
+pub fn ioctl(fd: i32, req: usize, arg: usize) i32 {
+    return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_IOCTL, @as(usize, @bitCast(@as(isize, fd))), req, arg)))));
+}
+
+pub fn tcgetattr(fd: i32, termios: *Termios) i32 {
+    return ioctl(fd, TCGETS, @intFromPtr(termios));
+}
+
+pub fn tcsetattr(fd: i32, termios: *const Termios) i32 {
+    return ioctl(fd, TCSETS, @intFromPtr(termios));
+}
+
+pub fn getWinsize(fd: i32) ?Winsize {
+    var ws: Winsize = undefined;
+    if (ioctl(fd, TIOCGWINSZ, @intFromPtr(&ws)) < 0) return null;
+    return ws;
+}
+
+pub fn setRawMode(fd: i32) ?Termios {
+    var t: Termios = undefined;
+    if (tcgetattr(fd, &t) < 0) return null;
+    var raw = t;
+    raw.iflag &= ~@as(u32, 0x000B);
+    raw.lflag &= ~(ECHO | ICANON | ISIG);
+    raw.oflag &= ~@as(u32, 0x0001);
+    raw.cc[VMIN] = 1;
+    raw.cc[VTIME] = 0;
+    if (tcsetattr(fd, &raw) < 0) return null;
+    return t;
+}
+
+pub fn restoreMode(fd: i32, termios: *const Termios) void {
+    _ = tcsetattr(fd, termios);
 }
 
 pub fn ftruncate(fd: i32, len: usize) i32 {
