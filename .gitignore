@@ -1,0 +1,6 @@
+.zig-cache/
+zig-out/
+out.asm
+out.bin
+out_arm64.bin
+*.ppm

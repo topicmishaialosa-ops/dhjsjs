@@ -1,0 +1,11 @@
+.{
+    .name = .dhjsjs,
+    .version = "0.1.0",
+    .fingerprint = 0xdfd7b2a6544ec9dd,
+    .minimum_zig_version = "0.13.0",
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
