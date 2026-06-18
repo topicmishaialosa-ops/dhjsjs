@@ -338,8 +338,9 @@ pub const CodeBuffer = struct {
     pub fn buildElf64(self: *CodeBuffer) void {
         const code_len = self.pos;
         const entry_off: u64 = 64 + 56;
-        const code_align: usize = 4096;
-        const code_sz = ((code_len + code_align - 1) / code_align) * code_align;
+        const page_align: u64 = 4096;
+        const total_file_sz: u64 = 64 + 56 + code_len;
+        const total_mem_sz = ((total_file_sz + page_align - 1) / page_align) * page_align;
 
         var code_copy: [65536]u8 = undefined;
         var ci: usize = 0;
@@ -368,13 +369,12 @@ pub const CodeBuffer = struct {
         self.qword(0);
         self.qword(0x400000);
         self.qword(0x400000);
-        self.qword(code_sz);
-        self.qword(code_sz);
-        self.qword(code_align);
+        self.qword(total_file_sz);
+        self.qword(total_mem_sz);
+        self.qword(page_align);
 
         ci = 0;
         while (ci < code_len) : (ci += 1) self.byte(code_copy[ci]);
-        while (self.pos < 64 + 56 + code_sz) : (self.pos += 1) self.buf[self.pos] = 0;
     }
 };
 
