@@ -391,6 +391,34 @@ pub fn pushfq(self: *CodeBuffer) void {
             code_copy[exit_pos - 2] == 0x89 and
             code_copy[exit_pos - 1] == 0xC7;
 
+        // Replace exit syscall with NOPs + RET (entry point return = process exit)
+        // RAX already contains the return value from main, just RET
+        if (found) {
+            if (has_main_entry) {
+                // Exit sequence: mov rdi,rax (3) + mov rax,60 (10) + syscall (2) = 15 bytes
+                // Replace with NOPs + RET
+                var p: usize = exit_pos - 3;
+                const end = exit_pos + 12; // 15 bytes total
+                while (p < end - 1) : (p += 1) code_copy[p] = 0x90;
+                code_copy[end - 1] = 0xC3; // RET
+            } else {
+                // No main: mov rdi,0 (10) + mov rax,60 (10) + syscall (2) = 22 bytes
+                // Find mov rdi,0 before exit_pos
+                var p: usize = 0;
+                while (p < exit_pos and p < code_len) : (p += 1) {
+                    if (code_copy[p] == 0x48 and p + 9 < code_len and code_copy[p + 1] == 0xBF) {
+                        // Found mov rdi, imm64 - replace with xor eax,eax + NOPs + RET
+                        code_copy[p] = 0x31; // xor eax, eax
+                        code_copy[p + 1] = 0xC0;
+                        var k: usize = p + 2;
+                        while (k < exit_pos + 12 - 1) : (k += 1) code_copy[k] = 0x90;
+                        code_copy[exit_pos + 12 - 1] = 0xC3; // RET
+                        break;
+                    }
+                }
+            }
+        }
+
         const file_align: u32 = 0x200;
         const sect_align: u32 = 0x1000;
         const headers_size: u32 = 0x200;
@@ -400,88 +428,9 @@ pub fn pushfq(self: *CodeBuffer) void {
         const text_file_sz: u32 = ((@as(u32, @intCast(code_len)) + file_align - 1) / file_align) * file_align;
         const text_mem_sz: u32 = ((@as(u32, @intCast(code_len)) + sect_align - 1) / sect_align) * sect_align;
 
-        const rdata_rva: u32 = text_rva + text_mem_sz;
-        const rdata_raw: u32 = text_raw + text_file_sz;
-
-        // Import data layout (offsets within .rdata)
-        const idt_off: u32 = 0;
-        const ilt_off: u32 = 40;
-        const iat_off: u32 = 56;
-        const hn_off: u32 = 72;
-        const dll_off: u32 = 86;
-        const import_data_size: u32 = dll_off + 13;
-
-        const rdata_file_sz: u32 = ((import_data_size + file_align - 1) / file_align) * file_align;
-        const rdata_mem_sz: u32 = ((import_data_size + sect_align - 1) / sect_align) * sect_align;
-        const image_size: u32 = text_rva + text_mem_sz + rdata_mem_sz;
+        const image_size: u32 = text_rva + text_mem_sz;
         const image_base: u64 = 0x140000000;
         const entry_rva: u32 = text_rva;
-
-        // Patch RIP-relative offset for `call [ExitProcess]`
-        const call_inst_file_off = @as(u32, @intCast(exit_pos)) + @as(u32, if (has_main_entry) 3 else 4);
-        const call_rip_rva = text_rva + call_inst_file_off + 6;
-        const iat_rva = rdata_rva + iat_off;
-        const call_disp = @as(i32, @intCast(iat_rva)) - @as(i32, @intCast(call_rip_rva));
-
-        // Patch code copy
-        if (has_main_entry) {
-            // mov ecx, eax (89 C1)
-            code_copy[exit_pos - 3] = 0x89;
-            code_copy[exit_pos - 2] = 0xC1;
-        } else {
-            // Replace mov rdi,0 (48 BF ...) with xor ecx,ecx (33 C9)
-            // Find mov rdi,0: 48 BF 00 00 00 00 00 00 00 00
-            // It's before exit_pos, search backwards
-            var mov_rdi_pos: usize = 0;
-            {
-                var j: usize = 0;
-                while (j < exit_pos) : (j += 1) {
-                    if (code_copy[j] == 0x48 and code_copy[j+1] == 0xBF) {
-                        mov_rdi_pos = j;
-                        break;
-                    }
-                }
-            }
-            if (mov_rdi_pos > 0) {
-                code_copy[mov_rdi_pos] = 0x33; // xor ecx, ecx
-                code_copy[mov_rdi_pos + 1] = 0xC9;
-                // Fill rest with NOPs
-                var k: usize = mov_rdi_pos + 2;
-                while (k < exit_pos) : (k += 1) code_copy[k] = 0x90;
-            }
-        }
-
-        // sub rsp, 32 (48 83 EC 20)
-        if (has_main_entry) {
-            code_copy[exit_pos - 1] = 0x48; // overwrites 0xC7 (last byte of old mov rdi,rax)
-            code_copy[exit_pos + 0] = 0x83;
-            code_copy[exit_pos + 1] = 0xEC;
-            code_copy[exit_pos + 2] = 0x20;
-        } else {
-            code_copy[exit_pos + 0] = 0x48;
-            code_copy[exit_pos + 1] = 0x83;
-            code_copy[exit_pos + 2] = 0xEC;
-            code_copy[exit_pos + 3] = 0x20;
-        }
-
-        // call [rip+offset] (FF 15 xx xx xx xx)
-        const call_off = if (has_main_entry) exit_pos + 3 else exit_pos + 4;
-        code_copy[call_off + 0] = 0xFF;
-        code_copy[call_off + 1] = 0x15;
-        code_copy[call_off + 2] = @as(u8, @intCast(@as(u32, @bitCast(call_disp)) & 0xFF));
-        code_copy[call_off + 3] = @as(u8, @intCast((@as(u32, @bitCast(call_disp)) >> 8) & 0xFF));
-        code_copy[call_off + 4] = @as(u8, @intCast((@as(u32, @bitCast(call_disp)) >> 16) & 0xFF));
-        code_copy[call_off + 5] = @as(u8, @intCast((@as(u32, @bitCast(call_disp)) >> 24) & 0xFF));
-
-        // NOP padding for remaining bytes of the original exit sequence
-        {
-            const pad_start = call_off + 6;
-            var p: usize = pad_start;
-            while (p < code_len) : (p += 1) {
-                if (p >= exit_pos + 12) break; // we replaced exactly 12 bytes from exit_pos
-                code_copy[p] = 0x90;
-            }
-        }
 
         // Build PE file
         self.pos = 0;
@@ -492,9 +441,9 @@ pub fn pushfq(self: *CodeBuffer) void {
             var z: usize = 0;
             while (z < 58) : (z += 1) self.byte(0);
         }
-        self.dword(0x80); // e_lfanew = offset to PE signature
+        self.dword(0x80); // e_lfanew
 
-        // DOS stub (64 bytes of zeros)
+        // DOS stub (64 bytes)
         {
             var z: usize = 0;
             while (z < 0x40) : (z += 1) self.byte(0);
@@ -505,7 +454,7 @@ pub fn pushfq(self: *CodeBuffer) void {
 
         // COFF Header (20 bytes)
         self.word(0x8664);                // Machine: x86_64
-        self.word(2);                      // NumberOfSections
+        self.word(1);                      // NumberOfSections (only .text)
         self.dword(0);                     // TimeDateStamp
         self.dword(0);                     // PointerToSymbolTable
         self.dword(0);                     // NumberOfSymbols
@@ -517,7 +466,7 @@ pub fn pushfq(self: *CodeBuffer) void {
         self.byte(10);                      // MajorLinkerVersion
         self.byte(0);                      // MinorLinkerVersion
         self.dword(@as(u32, @intCast(code_len))); // SizeOfCode
-        self.dword(import_data_size);      // SizeOfInitializedData
+        self.dword(0);                     // SizeOfInitializedData
         self.dword(0);                     // SizeOfUninitializedData
         self.dword(entry_rva);             // AddressOfEntryPoint
         self.dword(text_rva);              // BaseOfCode
@@ -535,7 +484,7 @@ pub fn pushfq(self: *CodeBuffer) void {
         self.dword(headers_size);          // SizeOfHeaders
         self.dword(0);                     // CheckSum
         self.word(3);                      // Subsystem: WINDOWS_CUI
-        self.word(0x0140);                 // DllCharacteristics (DYNAMIC_BASE | NX_COMPAT)
+        self.word(0x0140);                 // DllCharacteristics
         self.qword(0x100000);             // SizeOfStackReserve
         self.qword(0x1000);               // SizeOfStackCommit
         self.qword(0x100000);             // SizeOfHeapReserve
@@ -543,12 +492,10 @@ pub fn pushfq(self: *CodeBuffer) void {
         self.dword(0);                     // LoaderFlags
         self.dword(16);                    // NumberOfRvaAndSizes
 
-        // Data Directory (128 bytes)
-        self.dword(0); self.dword(0);                                          // Export
-        self.dword(rdata_rva + idt_off); self.dword(40);                        // Import
+        // Data Directory (128 bytes, all empty = no imports needed)
         {
             var z: usize = 0;
-            while (z < 14 * 8) : (z += 1) self.byte(0);
+            while (z < 16 * 8) : (z += 1) self.byte(0);
         }
 
         // Section: .text
@@ -559,15 +506,6 @@ pub fn pushfq(self: *CodeBuffer) void {
         self.dword(text_raw);
         self.dword(0); self.dword(0); self.word(0); self.word(0);
         self.dword(0x60000020); // CODE | EXECUTE | READ
-
-        // Section: .rdata
-        self.bytes(".idata\x00\x00\x00");
-        self.dword(import_data_size);
-        self.dword(rdata_rva);
-        self.dword(rdata_file_sz);
-        self.dword(rdata_raw);
-        self.dword(0); self.dword(0); self.word(0); self.word(0);
-        self.dword(0xC0000040); // INITIALIZED_DATA | READ | WRITE
 
         // Pad remaining headers to headers_size
         if (self.pos > headers_size) { self.pos = headers_size; }
@@ -581,29 +519,6 @@ pub fn pushfq(self: *CodeBuffer) void {
         // Pad to file_align
         const text_end = text_raw + text_file_sz;
         while (self.pos < text_end) { self.byte(0); }
-
-        // .rdata content
-        self.dword(rdata_rva + ilt_off);  // OriginalFirstThunk
-        self.dword(0);                     // TimeDateStamp
-        self.dword(0);                     // ForwarderChain
-        self.dword(rdata_rva + dll_off);   // Name
-        self.dword(rdata_rva + iat_off);   // FirstThunk
-        {
-            var z: usize = 0;
-            while (z < 20) : (z += 1) self.byte(0); // null IDT terminator
-        }
-        self.qword(rdata_rva + hn_off);    // ILT
-        self.qword(0);                      // ILT null
-        self.qword(rdata_rva + hn_off);    // IAT
-        self.qword(0);                      // IAT null
-        self.word(0);                       // Hint
-        self.bytes("ExitProcess");
-        self.byte(0);
-        self.bytes("kernel32.dll");
-        self.byte(0);
-        // Pad .rdata to file_align
-        const rdata_end = rdata_raw + rdata_file_sz;
-        while (self.pos < rdata_end) { self.byte(0); }
     }
 
     pub fn buildElf64(self: *CodeBuffer) void {
