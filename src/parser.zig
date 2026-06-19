@@ -643,6 +643,12 @@ pub const Parser = struct {
                 else if (c == 't') { self.strbuf[self.strbuf_off] = 0x09; }
                 else if (c == '\\') { self.strbuf[self.strbuf_off] = 0x5C; }
                 else if (c == '"') { self.strbuf[self.strbuf_off] = 0x22; }
+                else if (c == '0') { self.strbuf[self.strbuf_off] = 0x00; }
+                else if (c == 'x' and i + 2 < len) {
+                    i += 1; const hi = unhex(src[i]);
+                    i += 1; const lo = unhex(src[i]);
+                    self.strbuf[self.strbuf_off] = if (hi < 16 and lo < 16) @as(u8, @intCast(hi * 16 + lo)) else '?';
+                }
                 else { self.strbuf[self.strbuf_off] = '\\'; i -= 1; }
                 self.strbuf_off += 1;
             } else {
@@ -652,6 +658,13 @@ pub const Parser = struct {
             i += 1;
         }
         return self.strbuf[start..self.strbuf_off];
+    }
+
+    fn unhex(c: u8) u8 {
+        if (c >= '0' and c <= '9') return c - '0';
+        if (c >= 'a' and c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' and c <= 'F') return c - 'A' + 10;
+        return 0xFF;
     }
 
     fn parsePrimary(self: *Parser) NodeIdx {
