@@ -33,55 +33,381 @@ pub const Style = struct {
 };
 
 pub const style_dark = Style{
-    .bg = 0xFF1E1E1E,
-    .panel_bg = 0xFF252526,
-    .button_bg = 0xFF3C3C3C,
-    .button_hover = 0xFF505050,
-    .button_active = 0xFF2D2D2D,
-    .button_text = 0xFFCCCCCC,
-    .text = 0xFFCCCCCC,
-    .text_dim = 0xFF888888,
-    .accent = 0xFF0E639C,
-    .accent_hover = 0xFF1177BB,
-    .input_bg = 0xFF1E1E1E,
-    .input_border = 0xFF3C3C3C,
-    .input_text = 0xFFCCCCCC,
+    .bg = 0xFF1E1E1E, .panel_bg = 0xFF252526,
+    .button_bg = 0xFF3C3C3C, .button_hover = 0xFF505050, .button_active = 0xFF2D2D2D, .button_text = 0xFFCCCCCC,
+    .text = 0xFFCCCCCC, .text_dim = 0xFF888888,
+    .accent = 0xFF0E639C, .accent_hover = 0xFF1177BB,
+    .input_bg = 0xFF1E1E1E, .input_border = 0xFF3C3C3C, .input_text = 0xFFCCCCCC,
     .border = 0xFF3C3C3C,
-    .slider_track = 0xFF3C3C3C,
-    .slider_thumb = 0xFF0E639C,
+    .slider_track = 0xFF3C3C3C, .slider_thumb = 0xFF0E639C,
     .separator = 0xFF3C3C3C,
-    .header_bg = 0xFF2D2D2D,
-    .header_text = 0xFFCCCCCC,
-    .title_bg = 0xFF2D2D2D,
-    .title_text = 0xFFCCCCCC,
-    .check_bg = 0xFF1E1E1E,
-    .check_mark = 0xFFCCCCCC,
+    .header_bg = 0xFF2D2D2D, .header_text = 0xFFCCCCCC,
+    .title_bg = 0xFF2D2D2D, .title_text = 0xFFCCCCCC,
+    .check_bg = 0xFF1E1E1E, .check_mark = 0xFFCCCCCC,
 };
 
 pub const style_light = Style{
-    .bg = 0xFFF0F0F0,
-    .panel_bg = 0xFFFAFAFA,
-    .button_bg = 0xFFE0E0E0,
-    .button_hover = 0xFFD0D0D0,
-    .button_active = 0xFFC0C0C0,
-    .button_text = 0xFF222222,
-    .text = 0xFF222222,
-    .text_dim = 0xFF888888,
-    .accent = 0xFF0078D4,
-    .accent_hover = 0xFF106EBE,
-    .input_bg = 0xFFFFFFFF,
-    .input_border = 0xFFCCCCCC,
-    .input_text = 0xFF222222,
+    .bg = 0xFFF0F0F0, .panel_bg = 0xFFFAFAFA,
+    .button_bg = 0xFFE0E0E0, .button_hover = 0xFFD0D0D0, .button_active = 0xFFC0C0C0, .button_text = 0xFF222222,
+    .text = 0xFF222222, .text_dim = 0xFF888888,
+    .accent = 0xFF0078D4, .accent_hover = 0xFF106EBE,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFCCCCCC, .input_text = 0xFF222222,
     .border = 0xFFCCCCCC,
-    .slider_track = 0xFFCCCCCC,
-    .slider_thumb = 0xFF0078D4,
+    .slider_track = 0xFFCCCCCC, .slider_thumb = 0xFF0078D4,
     .separator = 0xFFCCCCCC,
-    .header_bg = 0xFFE8E8E8,
-    .header_text = 0xFF222222,
-    .title_bg = 0xFFE8E8E8,
-    .title_text = 0xFF222222,
-    .check_bg = 0xFFFFFFFF,
-    .check_mark = 0xFF222222,
+    .header_bg = 0xFFE8E8E8, .header_text = 0xFF222222,
+    .title_bg = 0xFFE8E8E8, .title_text = 0xFF222222,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFF222222,
+};
+
+pub const style_dracula = Style{
+    .bg = 0xFF282A36, .panel_bg = 0xFF2D2F3E,
+    .button_bg = 0xFF44475A, .button_hover = 0xFF5A5D75, .button_active = 0xFF383A4E, .button_text = 0xFFF8F8F2,
+    .text = 0xFFF8F8F2, .text_dim = 0xFF6272A4,
+    .accent = 0xFFBD93F9, .accent_hover = 0xFFCCA9FF,
+    .input_bg = 0xFF1E1F2E, .input_border = 0xFF44475A, .input_text = 0xFFF8F8F2,
+    .border = 0xFF44475A,
+    .slider_track = 0xFF44475A, .slider_thumb = 0xFFBD93F9,
+    .separator = 0xFF44475A,
+    .header_bg = 0xFF2D2F3E, .header_text = 0xFFF8F8F2,
+    .title_bg = 0xFF2D2F3E, .title_text = 0xFFBD93F9,
+    .check_bg = 0xFF1E1F2E, .check_mark = 0xFF50FA7B,
+};
+
+pub const style_nord = Style{
+    .bg = 0xFF2E3440, .panel_bg = 0xFF3B4252,
+    .button_bg = 0xFF434C5E, .button_hover = 0xFF4C566A, .button_active = 0xFF3B4252, .button_text = 0xFFECEFF4,
+    .text = 0xFFECEFF4, .text_dim = 0xFF81A1C1,
+    .accent = 0xFF88C0D0, .accent_hover = 0xFFA3D0D8,
+    .input_bg = 0xFF2E3440, .input_border = 0xFF434C5E, .input_text = 0xFFECEFF4,
+    .border = 0xFF434C5E,
+    .slider_track = 0xFF434C5E, .slider_thumb = 0xFF88C0D0,
+    .separator = 0xFF434C5E,
+    .header_bg = 0xFF3B4252, .header_text = 0xFFECEFF4,
+    .title_bg = 0xFF3B4252, .title_text = 0xFF88C0D0,
+    .check_bg = 0xFF2E3440, .check_mark = 0xFFA3BE8C,
+};
+
+pub const style_solarized_dark = Style{
+    .bg = 0xFF002B36, .panel_bg = 0xFF073642,
+    .button_bg = 0xFF184C56, .button_hover = 0xFF246572, .button_active = 0xFF0E3842, .button_text = 0xFF93A1A1,
+    .text = 0xFF93A1A1, .text_dim = 0xFF657B83,
+    .accent = 0xFF268BD2, .accent_hover = 0xFF44A4E0,
+    .input_bg = 0xFF002B36, .input_border = 0xFF184C56, .input_text = 0xFF93A1A1,
+    .border = 0xFF184C56,
+    .slider_track = 0xFF184C56, .slider_thumb = 0xFF268BD2,
+    .separator = 0xFF184C56,
+    .header_bg = 0xFF073642, .header_text = 0xFF93A1A1,
+    .title_bg = 0xFF073642, .title_text = 0xFF268BD2,
+    .check_bg = 0xFF002B36, .check_mark = 0xFF859900,
+};
+
+pub const style_solarized_light = Style{
+    .bg = 0xFFFDF6E3, .panel_bg = 0xFFEEE8D5,
+    .button_bg = 0xFFE4DDC9, .button_hover = 0xFFD5CEB8, .button_active = 0xFFDDD5C1, .button_text = 0xFF586E75,
+    .text = 0xFF586E75, .text_dim = 0xFF93A1A1,
+    .accent = 0xFF268BD2, .accent_hover = 0xFF1A7CC0,
+    .input_bg = 0xFFFDF6E3, .input_border = 0xFFE4DDC9, .input_text = 0xFF586E75,
+    .border = 0xFFE4DDC9,
+    .slider_track = 0xFFE4DDC9, .slider_thumb = 0xFF268BD2,
+    .separator = 0xFFE4DDC9,
+    .header_bg = 0xFFEEE8D5, .header_text = 0xFF586E75,
+    .title_bg = 0xFFEEE8D5, .title_text = 0xFF268BD2,
+    .check_bg = 0xFFFDF6E3, .check_mark = 0xFF859900,
+};
+
+pub const style_monokai = Style{
+    .bg = 0xFF272822, .panel_bg = 0xFF2D2E27,
+    .button_bg = 0xFF3E3D32, .button_hover = 0xFF4F4E42, .button_active = 0xFF35362E, .button_text = 0xFFF8F8F2,
+    .text = 0xFFF8F8F2, .text_dim = 0xFF75715E,
+    .accent = 0xFFA6E22E, .accent_hover = 0xFFBBF045,
+    .input_bg = 0xFF1A1A16, .input_border = 0xFF3E3D32, .input_text = 0xFFF8F8F2,
+    .border = 0xFF3E3D32,
+    .slider_track = 0xFF3E3D32, .slider_thumb = 0xFFA6E22E,
+    .separator = 0xFF3E3D32,
+    .header_bg = 0xFF2D2E27, .header_text = 0xFFF8F8F2,
+    .title_bg = 0xFF2D2E27, .title_text = 0xFFA6E22E,
+    .check_bg = 0xFF1A1A16, .check_mark = 0xFFFD971F,
+};
+
+pub const style_one_dark = Style{
+    .bg = 0xFF282C34, .panel_bg = 0xFF313640,
+    .button_bg = 0xFF3E4451, .button_hover = 0xFF4F5665, .button_active = 0xFF353B45, .button_text = 0xFFABB2BF,
+    .text = 0xFFABB2BF, .text_dim = 0xFF5C6370,
+    .accent = 0xFF61AFEF, .accent_hover = 0xFF7EC2F8,
+    .input_bg = 0xFF21252B, .input_border = 0xFF3E4451, .input_text = 0xFFABB2BF,
+    .border = 0xFF3E4451,
+    .slider_track = 0xFF3E4451, .slider_thumb = 0xFF61AFEF,
+    .separator = 0xFF3E4451,
+    .header_bg = 0xFF313640, .header_text = 0xFFABB2BF,
+    .title_bg = 0xFF313640, .title_text = 0xFF61AFEF,
+    .check_bg = 0xFF21252B, .check_mark = 0xFF98C379,
+};
+
+pub const style_github_light = Style{
+    .bg = 0xFFFFFFFF, .panel_bg = 0xFFF6F8FA,
+    .button_bg = 0xFFF0F2F5, .button_hover = 0xFFE1E4E8, .button_active = 0xFFD1D5DA, .button_text = 0xFF24292E,
+    .text = 0xFF24292E, .text_dim = 0xFF586069,
+    .accent = 0xFF0366D6, .accent_hover = 0xFF0256B3,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFD1D5DA, .input_text = 0xFF24292E,
+    .border = 0xFFD1D5DA,
+    .slider_track = 0xFFE1E4E8, .slider_thumb = 0xFF0366D6,
+    .separator = 0xFFE1E4E8,
+    .header_bg = 0xFFF6F8FA, .header_text = 0xFF24292E,
+    .title_bg = 0xFFF6F8FA, .title_text = 0xFF0366D6,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFF28A745,
+};
+
+pub const style_gruvbox_dark = Style{
+    .bg = 0xFF282828, .panel_bg = 0xFF32302F,
+    .button_bg = 0xFF3C3836, .button_hover = 0xFF504945, .button_active = 0xFF32302F, .button_text = 0xFFEBDBB2,
+    .text = 0xFFEBDBB2, .text_dim = 0xFF928374,
+    .accent = 0xFFD79921, .accent_hover = 0xFFE5B92C,
+    .input_bg = 0xFF1D2021, .input_border = 0xFF3C3836, .input_text = 0xFFEBDBB2,
+    .border = 0xFF3C3836,
+    .slider_track = 0xFF3C3836, .slider_thumb = 0xFFD79921,
+    .separator = 0xFF3C3836,
+    .header_bg = 0xFF32302F, .header_text = 0xFFEBDBB2,
+    .title_bg = 0xFF32302F, .title_text = 0xFFD79921,
+    .check_bg = 0xFF1D2021, .check_mark = 0xFF98971A,
+};
+
+pub const style_gruvbox_light = Style{
+    .bg = 0xFFFBF1C7, .panel_bg = 0xFFF2E5BC,
+    .button_bg = 0xFFE6D5AA, .button_hover = 0xFFD5C49A, .button_active = 0xFFDDCCA2, .button_text = 0xFF3C3836,
+    .text = 0xFF3C3836, .text_dim = 0xFF928374,
+    .accent = 0xFFB57614, .accent_hover = 0xFF9D6510,
+    .input_bg = 0xFFFBF1C7, .input_border = 0xFFE6D5AA, .input_text = 0xFF3C3836,
+    .border = 0xFFE6D5AA,
+    .slider_track = 0xFFE6D5AA, .slider_thumb = 0xFFB57614,
+    .separator = 0xFFE6D5AA,
+    .header_bg = 0xFFF2E5BC, .header_text = 0xFF3C3836,
+    .title_bg = 0xFFF2E5BC, .title_text = 0xFFB57614,
+    .check_bg = 0xFFFBF1C7, .check_mark = 0xFF98971A,
+};
+
+pub const style_catppuccin = Style{
+    .bg = 0xFF1E1E2E, .panel_bg = 0xFF252540,
+    .button_bg = 0xFF363650, .button_hover = 0xFF48486A, .button_active = 0xFF2E2E48, .button_text = 0xFFCDD6F4,
+    .text = 0xFFCDD6F4, .text_dim = 0xFF6C7086,
+    .accent = 0xFFCBA6F7, .accent_hover = 0xFFD3BDF8,
+    .input_bg = 0xFF181825, .input_border = 0xFF363650, .input_text = 0xFFCDD6F4,
+    .border = 0xFF363650,
+    .slider_track = 0xFF363650, .slider_thumb = 0xFFCBA6F7,
+    .separator = 0xFF363650,
+    .header_bg = 0xFF252540, .header_text = 0xFFCDD6F4,
+    .title_bg = 0xFF252540, .title_text = 0xFFCBA6F7,
+    .check_bg = 0xFF181825, .check_mark = 0xFFA6E3A1,
+};
+
+pub const style_tokyo_night = Style{
+    .bg = 0xFF1A1B26, .panel_bg = 0xFF222335,
+    .button_bg = 0xFF2F3048, .button_hover = 0xFF3D3E5C, .button_active = 0xFF282940, .button_text = 0xFFA9B1D6,
+    .text = 0xFFA9B1D6, .text_dim = 0xFF565F89,
+    .accent = 0xFF7AA2F7, .accent_hover = 0xFF92B5F9,
+    .input_bg = 0xFF13131D, .input_border = 0xFF2F3048, .input_text = 0xFFA9B1D6,
+    .border = 0xFF2F3048,
+    .slider_track = 0xFF2F3048, .slider_thumb = 0xFF7AA2F7,
+    .separator = 0xFF2F3048,
+    .header_bg = 0xFF222335, .header_text = 0xFFA9B1D6,
+    .title_bg = 0xFF222335, .title_text = 0xFF7AA2F7,
+    .check_bg = 0xFF13131D, .check_mark = 0xFF9ECE6A,
+};
+
+pub const style_ayu_dark = Style{
+    .bg = 0xFF0A0E14, .panel_bg = 0xFF141820,
+    .button_bg = 0xFF1F2430, .button_hover = 0xFF2D3340, .button_active = 0xFF191E28, .button_text = 0xFFC7C7C7,
+    .text = 0xFFC7C7C7, .text_dim = 0xFF6C7380,
+    .accent = 0xFFF29668, .accent_hover = 0xFFF5AD82,
+    .input_bg = 0xFF06090E, .input_border = 0xFF1F2430, .input_text = 0xFFC7C7C7,
+    .border = 0xFF1F2430,
+    .slider_track = 0xFF1F2430, .slider_thumb = 0xFFF29668,
+    .separator = 0xFF1F2430,
+    .header_bg = 0xFF141820, .header_text = 0xFFC7C7C7,
+    .title_bg = 0xFF141820, .title_text = 0xFFF29668,
+    .check_bg = 0xFF06090E, .check_mark = 0xFF87CEEB,
+};
+
+pub const style_ayu_light = Style{
+    .bg = 0xFFFAFAFA, .panel_bg = 0xFFF5F5F5,
+    .button_bg = 0xFFE8E8E8, .button_hover = 0xFFD6D6D6, .button_active = 0xFFDCDCDC, .button_text = 0xFF333333,
+    .text = 0xFF333333, .text_dim = 0xFF8A8A8A,
+    .accent = 0xFFF29668, .accent_hover = 0xFFE8865A,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFCCCCCC, .input_text = 0xFF333333,
+    .border = 0xFFCCCCCC,
+    .slider_track = 0xFFE0E0E0, .slider_thumb = 0xFFF29668,
+    .separator = 0xFFE0E0E0,
+    .header_bg = 0xFFF0F0F0, .header_text = 0xFF333333,
+    .title_bg = 0xFFF0F0F0, .title_text = 0xFFF29668,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFF86B300,
+};
+
+pub const style_material_dark = Style{
+    .bg = 0xFF212121, .panel_bg = 0xFF2C2C2C,
+    .button_bg = 0xFF383838, .button_hover = 0xFF484848, .button_active = 0xFF303030, .button_text = 0xFFEEEEEE,
+    .text = 0xFFEEEEEE, .text_dim = 0xFF888888,
+    .accent = 0xFF4CAF50, .accent_hover = 0xFF66BB6A,
+    .input_bg = 0xFF1A1A1A, .input_border = 0xFF383838, .input_text = 0xFFEEEEEE,
+    .border = 0xFF383838,
+    .slider_track = 0xFF383838, .slider_thumb = 0xFF4CAF50,
+    .separator = 0xFF383838,
+    .header_bg = 0xFF2C2C2C, .header_text = 0xFFEEEEEE,
+    .title_bg = 0xFF2C2C2C, .title_text = 0xFF4CAF50,
+    .check_bg = 0xFF1A1A1A, .check_mark = 0xFF4CAF50,
+};
+
+pub const style_material_light = Style{
+    .bg = 0xFFFAFAFA, .panel_bg = 0xFFFFFFFF,
+    .button_bg = 0xFFE0E0E0, .button_hover = 0xFFD0D0D0, .button_active = 0xFFC8C8C8, .button_text = 0xFF333333,
+    .text = 0xFF333333, .text_dim = 0xFF888888,
+    .accent = 0xFF1976D2, .accent_hover = 0xFF1565C0,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFBDBDBD, .input_text = 0xFF333333,
+    .border = 0xFFBDBDBD,
+    .slider_track = 0xFFE0E0E0, .slider_thumb = 0xFF1976D2,
+    .separator = 0xFFE0E0E0,
+    .header_bg = 0xFFF5F5F5, .header_text = 0xFF333333,
+    .title_bg = 0xFFF5F5F5, .title_text = 0xFF1976D2,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFF1976D2,
+};
+
+pub const style_high_contrast = Style{
+    .bg = 0xFF000000, .panel_bg = 0xFF0D0D0D,
+    .button_bg = 0xFF1A1A1A, .button_hover = 0xFF333333, .button_active = 0xFF0D0D0D, .button_text = 0xFFFFFFFF,
+    .text = 0xFFFFFFFF, .text_dim = 0xFFAAAAAA,
+    .accent = 0xFFFFFFFF, .accent_hover = 0xFFCCCCCC,
+    .input_bg = 0xFF000000, .input_border = 0xFFFFFFFF, .input_text = 0xFFFFFFFF,
+    .border = 0xFFFFFFFF,
+    .slider_track = 0xFF333333, .slider_thumb = 0xFFFFFFFF,
+    .separator = 0xFFFFFFFF,
+    .header_bg = 0xFF0D0D0D, .header_text = 0xFFFFFFFF,
+    .title_bg = 0xFF0D0D0D, .title_text = 0xFFFFFFFF,
+    .check_bg = 0xFF000000, .check_mark = 0xFFFFFFFF,
+};
+
+pub const style_retro_terminal = Style{
+    .bg = 0xFF0D0D0D, .panel_bg = 0xFF111111,
+    .button_bg = 0xFF1A1A1A, .button_hover = 0xFF222222, .button_active = 0xFF0F0F0F, .button_text = 0xFF33FF33,
+    .text = 0xFF33FF33, .text_dim = 0xFF1A8C1A,
+    .accent = 0xFF33FF33, .accent_hover = 0xFF66FF66,
+    .input_bg = 0xFF050505, .input_border = 0xFF33FF33, .input_text = 0xFF33FF33,
+    .border = 0xFF33FF33,
+    .slider_track = 0xFF1A1A1A, .slider_thumb = 0xFF33FF33,
+    .separator = 0xFF33FF33,
+    .header_bg = 0xFF111111, .header_text = 0xFF33FF33,
+    .title_bg = 0xFF111111, .title_text = 0xFF33FF33,
+    .check_bg = 0xFF050505, .check_mark = 0xFF33FF33,
+};
+
+pub const style_forest = Style{
+    .bg = 0xFF1E2E1E, .panel_bg = 0xFF253725,
+    .button_bg = 0xFF2F452F, .button_hover = 0xFF3D573D, .button_active = 0xFF283D28, .button_text = 0xFFD4E7D4,
+    .text = 0xFFD4E7D4, .text_dim = 0xFF7AA87A,
+    .accent = 0xFF6BBF6B, .accent_hover = 0xFF85CF85,
+    .input_bg = 0xFF152215, .input_border = 0xFF2F452F, .input_text = 0xFFD4E7D4,
+    .border = 0xFF2F452F,
+    .slider_track = 0xFF2F452F, .slider_thumb = 0xFF6BBF6B,
+    .separator = 0xFF2F452F,
+    .header_bg = 0xFF253725, .header_text = 0xFFD4E7D4,
+    .title_bg = 0xFF253725, .title_text = 0xFF6BBF6B,
+    .check_bg = 0xFF152215, .check_mark = 0xFFA8D8A8,
+};
+
+pub const style_ocean = Style{
+    .bg = 0xFF0D1B2A, .panel_bg = 0xFF142538,
+    .button_bg = 0xFF1B344E, .button_hover = 0xFF254664, .button_active = 0xFF162D44, .button_text = 0xFFD0E8F0,
+    .text = 0xFFD0E8F0, .text_dim = 0xFF6090A0,
+    .accent = 0xFF40B4D0, .accent_hover = 0xFF5CC9E4,
+    .input_bg = 0xFF091420, .input_border = 0xFF1B344E, .input_text = 0xFFD0E8F0,
+    .border = 0xFF1B344E,
+    .slider_track = 0xFF1B344E, .slider_thumb = 0xFF40B4D0,
+    .separator = 0xFF1B344E,
+    .header_bg = 0xFF142538, .header_text = 0xFFD0E8F0,
+    .title_bg = 0xFF142538, .title_text = 0xFF40B4D0,
+    .check_bg = 0xFF091420, .check_mark = 0xFF60D0A0,
+};
+
+pub const style_sunset = Style{
+    .bg = 0xFF1A1410, .panel_bg = 0xFF241C16,
+    .button_bg = 0xFF33281E, .button_hover = 0xFF44362A, .button_active = 0xFF2C221A, .button_text = 0xFFE8D5C0,
+    .text = 0xFFE8D5C0, .text_dim = 0xFFA08060,
+    .accent = 0xFFE87540, .accent_hover = 0xFFF09060,
+    .input_bg = 0xFF120E0A, .input_border = 0xFF33281E, .input_text = 0xFFE8D5C0,
+    .border = 0xFF33281E,
+    .slider_track = 0xFF33281E, .slider_thumb = 0xFFE87540,
+    .separator = 0xFF33281E,
+    .header_bg = 0xFF241C16, .header_text = 0xFFE8D5C0,
+    .title_bg = 0xFF241C16, .title_text = 0xFFE87540,
+    .check_bg = 0xFF120E0A, .check_mark = 0xFFF0C040,
+};
+
+pub const style_candy = Style{
+    .bg = 0xFF1E1020, .panel_bg = 0xFF281A2C,
+    .button_bg = 0xFF3A2440, .button_hover = 0xFF4D3054, .button_active = 0xFF321E38, .button_text = 0xFFF0E0F0,
+    .text = 0xFFF0E0F0, .text_dim = 0xFFA080B0,
+    .accent = 0xFFE060B0, .accent_hover = 0xFFE880C0,
+    .input_bg = 0xFF140A16, .input_border = 0xFF3A2440, .input_text = 0xFFF0E0F0,
+    .border = 0xFF3A2440,
+    .slider_track = 0xFF3A2440, .slider_thumb = 0xFFE060B0,
+    .separator = 0xFF3A2440,
+    .header_bg = 0xFF281A2C, .header_text = 0xFFF0E0F0,
+    .title_bg = 0xFF281A2C, .title_text = 0xFFE060B0,
+    .check_bg = 0xFF140A16, .check_mark = 0xFF80E0B0,
+};
+
+pub const style_monochrome = Style{
+    .bg = 0xFF1A1A1A, .panel_bg = 0xFF222222,
+    .button_bg = 0xFF333333, .button_hover = 0xFF444444, .button_active = 0xFF2A2A2A, .button_text = 0xFFE0E0E0,
+    .text = 0xFFE0E0E0, .text_dim = 0xFF808080,
+    .accent = 0xFFB0B0B0, .accent_hover = 0xFFCCCCCC,
+    .input_bg = 0xFF121212, .input_border = 0xFF333333, .input_text = 0xFFE0E0E0,
+    .border = 0xFF333333,
+    .slider_track = 0xFF333333, .slider_thumb = 0xFFB0B0B0,
+    .separator = 0xFF333333,
+    .header_bg = 0xFF222222, .header_text = 0xFFE0E0E0,
+    .title_bg = 0xFF222222, .title_text = 0xFFCCCCCC,
+    .check_bg = 0xFF121212, .check_mark = 0xFFE0E0E0,
+};
+
+pub const style_rose_pine = Style{
+    .bg = 0xFF191724, .panel_bg = 0xFF1F1D2E,
+    .button_bg = 0xFF2A273F, .button_hover = 0xFF363253, .button_active = 0xFF242237, .button_text = 0xFFE0DEF4,
+    .text = 0xFFE0DEF4, .text_dim = 0xFF6E6A86,
+    .accent = 0xFFEBBCBA, .accent_hover = 0xFFF0D0CE,
+    .input_bg = 0xFF13101D, .input_border = 0xFF2A273F, .input_text = 0xFFE0DEF4,
+    .border = 0xFF2A273F,
+    .slider_track = 0xFF2A273F, .slider_thumb = 0xFFEBBCBA,
+    .separator = 0xFF2A273F,
+    .header_bg = 0xFF1F1D2E, .header_text = 0xFFE0DEF4,
+    .title_bg = 0xFF1F1D2E, .title_text = 0xFFEBBCBA,
+    .check_bg = 0xFF13101D, .check_mark = 0xFF9CCFD8,
+};
+
+pub const style_everforest = Style{
+    .bg = 0xFF2D353B, .panel_bg = 0xFF343F44,
+    .button_bg = 0xFF3D4A50, .button_hover = 0xFF4D5A60, .button_active = 0xFF364348, .button_text = 0xFFD3C6AA,
+    .text = 0xFFD3C6AA, .text_dim = 0xFF859080,
+    .accent = 0xFFA7C080, .accent_hover = 0xFFBAD99A,
+    .input_bg = 0xFF232A2E, .input_border = 0xFF3D4A50, .input_text = 0xFFD3C6AA,
+    .border = 0xFF3D4A50,
+    .slider_track = 0xFF3D4A50, .slider_thumb = 0xFFA7C080,
+    .separator = 0xFF3D4A50,
+    .header_bg = 0xFF343F44, .header_text = 0xFFD3C6AA,
+    .title_bg = 0xFF343F44, .title_text = 0xFFA7C080,
+    .check_bg = 0xFF232A2E, .check_mark = 0xFFE69875,
+};
+
+pub const style_nord_light = Style{
+    .bg = 0xFFEFF1F5, .panel_bg = 0xFFE6E8ED,
+    .button_bg = 0xFFD8DCE5, .button_hover = 0xFFC9CDD7, .button_active = 0xFFCFD3DD, .button_text = 0xFF2E3440,
+    .text = 0xFF2E3440, .text_dim = 0xFF7B88A1,
+    .accent = 0xFF5E81AC, .accent_hover = 0xFF4F73A0,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFD8DCE5, .input_text = 0xFF2E3440,
+    .border = 0xFFD8DCE5,
+    .slider_track = 0xFFD8DCE5, .slider_thumb = 0xFF5E81AC,
+    .separator = 0xFFD8DCE5,
+    .header_bg = 0xFFE6E8ED, .header_text = 0xFF2E3440,
+    .title_bg = 0xFFE6E8ED, .title_text = 0xFF5E81AC,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFFA3BE8C,
 };
 
 pub const WidgetStateType = enum(u8) {
