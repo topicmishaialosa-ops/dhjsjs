@@ -61,36 +61,62 @@ pub fn main() void {
 
     const styles = allStyles();
     var style_idx: usize = 0;
+    var mouse_x: i32 = 0;
+    var mouse_y: i32 = 0;
+    var mouse_down = false;
+    var mouse_clicked = false;
+    var mouse_released = false;
+
+    var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
     var running = true;
     while (running) {
-        var input = gui_mod.InputState{
-            .mouse_x = 0, .mouse_y = 0,
-            .mouse_down = false, .mouse_clicked = false, .mouse_released = false,
+        mouse_clicked = false;
+        mouse_released = false;
+
+        while (disp.pollEvent()) |event| {
+            switch (event) {
+                .key_press => |kc| {
+                    if (kc == 9) running = false;
+                    if (kc < gui_mod.MAX_KEY) key_state[kc] = true;
+                },
+                .key_release => |kc| {
+                    if (kc < gui_mod.MAX_KEY) key_state[kc] = false;
+                },
+                .mouse_move => |m| { mouse_x = m.x; mouse_y = m.y; },
+                .mouse_down => |m| {
+                    mouse_x = m.x; mouse_y = m.y;
+                    mouse_down = true;
+                    mouse_clicked = true;
+                },
+                .mouse_up => |m| {
+                    mouse_x = m.x; mouse_y = m.y;
+                    mouse_down = false;
+                    mouse_released = true;
+                },
+                .close => running = false,
+                .expose => {},
+                .resize => |r| { _ = r; },
+            }
+        }
+
+        const input = gui_mod.InputState{
+            .mouse_x = mouse_x,
+            .mouse_y = mouse_y,
+            .mouse_down = mouse_down,
+            .mouse_clicked = mouse_clicked,
+            .mouse_released = mouse_released,
             .scroll = 0,
-            .keys = [_]bool{false} ** gui_mod.MAX_KEY,
+            .keys = key_state,
             .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
             .text_input = [_]u8{0} ** 16,
             .text_len = 0,
         };
 
-        while (disp.pollEvent()) |ev| {
-            if (ev == 0xFF) {
-                running = false;
-            } else if (ev == 9) {
-                running = false;
-            } else {
-                if (ev < gui_mod.MAX_KEY) {
-                    input.keys[ev] = true;
-                    input.keys_pressed[ev] = true;
-                }
-            }
-        }
-
         gui.beginFrame(&fb, input);
         _ = gui.beginWindow("Widgets Demo", 10, 10, 350, 540, true);
 
-        gui.label("Click button to increment:");
+        gui.label("Click button (mouse works now!):");
         if (gui.button("Click me!")) {
             click_count += 1;
         }
@@ -117,12 +143,27 @@ pub fn main() void {
         gui.checkbox("Enable feature", &checkbox_val);
 
         {
-            var buf: [32]u8 = undefined;
+            var buf: [64]u8 = undefined;
             var len: usize = 0;
-            const prefix = "Checkbox: ";
-            for (prefix) |c| { if (len < 30) { buf[len] = c; len += 1; } }
-            if (checkbox_val) { const t = "ON"; for (t) |c| { if (len < 30) { buf[len] = c; len += 1; } } }
-            else { const t = "OFF"; for (t) |c| { if (len < 30) { buf[len] = c; len += 1; } } }
+            const mx: i32 = mouse_x;
+            const my: i32 = mouse_y;
+            const ms = "Mouse: ";
+            for (ms) |c| { if (len < 60) { buf[len] = c; len += 1; } }
+            var mxt = mx;
+            var mdig: [16]u8 = undefined;
+            var mdc: usize = 0;
+            if (mxt == 0) { mdig[mdc] = '0'; mdc += 1; }
+            else { while (mxt > 0) { mdig[mdc] = @as(u8, @intCast('0' + @rem(mxt, 10))); mxt = @divTrunc(mxt, 10); mdc += 1; } }
+            var mdi: usize = mdc;
+            while (mdi > 0) { mdi -= 1; if (len < 60) { buf[len] = mdig[mdi]; len += 1; } }
+            const comma = ", ";
+            for (comma) |c| { if (len < 60) { buf[len] = c; len += 1; } }
+            var myt = my;
+            mdc = 0;
+            if (myt == 0) { mdig[mdc] = '0'; mdc += 1; }
+            else { while (myt > 0) { mdig[mdc] = @as(u8, @intCast('0' + @rem(myt, 10))); myt = @divTrunc(myt, 10); mdc += 1; } }
+            mdi = mdc;
+            while (mdi > 0) { mdi -= 1; if (len < 60) { buf[len] = mdig[mdi]; len += 1; } }
             gui.label(buf[0..len]);
         }
 
@@ -138,7 +179,7 @@ pub fn main() void {
         gui.endWindow();
 
         _ = gui.beginWindow("Style Switcher", 380, 10, 410, 540, true);
-        gui.label("Pick a theme (click to apply):");
+        gui.label("Pick a theme:");
         gui.separator();
 
         const per_col: usize = 2;
@@ -166,7 +207,7 @@ pub fn main() void {
             for (styles[style_idx].name) |c| { if (len < 60) { buf[len] = c; len += 1; } }
             gui.label(buf[0..len]);
         }
-        gui.labelColored("Custom styles: define your own Style struct!", gui.style.accent);
+        gui.labelColored("Custom: define your own Style{}", gui.style.accent);
         gui.endWindow();
 
         gui.endFrame();
