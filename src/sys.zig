@@ -142,11 +142,12 @@ pub const STDOUT: i32 = 1;
 pub const VMIN: usize = 6;
 pub const VTIME: usize = 5;
 
-pub const Termios = struct {
+pub const Termios = extern struct {
     iflag: u32,
     oflag: u32,
     cflag: u32,
     lflag: u32,
+    c_line: u8,
     cc: [19]u8,
 };
 

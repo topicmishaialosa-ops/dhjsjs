@@ -1,0 +1,9 @@
+fn main() int {
+    hui i = 0;
+    hui s = 0;
+    while i < 10 {
+        s = s + 1;
+        i = i + 1;
+    }
+    return s;
+}

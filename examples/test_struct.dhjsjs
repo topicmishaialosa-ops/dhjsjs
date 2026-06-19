@@ -1,0 +1,10 @@
+struct Point {
+    hui x;
+    hui y;
+}
+
+fn main() int {
+    hui p = 0;
+    hui v = p.x;
+    return v;
+}

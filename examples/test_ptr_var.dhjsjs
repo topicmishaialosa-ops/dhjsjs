@@ -1,0 +1,5 @@
+fn main() int {
+    hui x = 42;
+    hui p = &x;
+    return *p;
+}

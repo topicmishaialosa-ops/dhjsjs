@@ -6,3 +6,8 @@ x11test
 dhjsjs
 dhjsjs.o
 new/
+dhjsjs_cc
+dhjsjs_cc_debug
+*.bak
+*.apk
+/tmp/

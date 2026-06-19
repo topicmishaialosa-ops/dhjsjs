@@ -1,0 +1,8 @@
+fn main() int {
+    hui x = 1;
+    {
+        hui x = 2;
+        x = x + 1;
+    }
+    return x;
+}

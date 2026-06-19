@@ -25,13 +25,7 @@ pub const Lexer = struct {
     col: usize,
 
     pub fn init(source: [*]const u8, len: usize) Lexer {
-        return Lexer{
-            .source = source,
-            .len = len,
-            .pos = 0,
-            .line = 1,
-            .col = 1,
-        };
+        return Lexer{ .source = source, .len = len, .pos = 0, .line = 1, .col = 1 };
     }
 
     pub fn initSlice(source: []const u8) Lexer {
@@ -40,23 +34,15 @@ pub const Lexer = struct {
 
     pub fn next(self: *Lexer) Token {
         self.skipWhitespace();
-        if (self.pos >= self.len) {
-            return Token{ .kind = .eof, .start = "", .len = 0, .line = self.line, .col = self.col };
-        }
+        if (self.pos >= self.len) return Token{ .kind = .eof, .start = "", .len = 0, .line = self.line, .col = self.col };
 
         const start_line = self.line;
         const start_col = self.col;
         const ch = self.source[self.pos];
 
-        if (utils.isAlpha(ch)) {
-            return self.readWord(start_line, start_col);
-        }
-        if (utils.isDigit(ch)) {
-            return self.readNumber(start_line, start_col);
-        }
-        if (ch == '"') {
-            return self.readString(start_line, start_col);
-        }
+        if (utils.isAlpha(ch)) return self.readWord(start_line, start_col);
+        if (utils.isDigit(ch)) return self.readNumber(start_line, start_col);
+        if (ch == '"') return self.readString(start_line, start_col);
         return self.readSymbol(start_line, start_col);
     }
 
@@ -83,17 +69,11 @@ pub const Lexer = struct {
 
     fn readWord(self: *Lexer, line: usize, col: usize) Token {
         const start = self.pos;
-        while (self.pos < self.len and (utils.isAlphaNum(self.source[self.pos]))) {
+        while (self.pos < self.len and utils.isAlphaNum(self.source[self.pos])) {
             self.pos += 1;
             self.col += 1;
         }
-        const tok = Token{
-            .kind = .keyword,
-            .start = self.source + start,
-            .len = self.pos - start,
-            .line = line,
-            .col = col,
-        };
+        const tok = Token{ .kind = .keyword, .start = self.source + start, .len = self.pos - start, .line = line, .col = col };
         if (!isKeyword(self.source + start, self.pos - start)) {
             return Token{ .kind = .identifier, .start = self.source + start, .len = self.pos - start, .line = line, .col = col };
         }
@@ -114,19 +94,11 @@ pub const Lexer = struct {
         self.col += 1;
         const start = self.pos;
         while (self.pos < self.len and self.source[self.pos] != '"') {
-            if (self.source[self.pos] == '\\') {
-                self.pos += 2;
-                self.col += 2;
-            } else {
-                self.pos += 1;
-                self.col += 1;
-            }
+            if (self.source[self.pos] == '\\') { self.pos += 2; self.col += 2; }
+            else { self.pos += 1; self.col += 1; }
         }
         const tok = Token{ .kind = .string, .start = self.source + start, .len = self.pos - start, .line = line, .col = col };
-        if (self.pos < self.len) {
-            self.pos += 1;
-            self.col += 1;
-        }
+        if (self.pos < self.len) { self.pos += 1; self.col += 1; }
         return tok;
     }
 
@@ -140,11 +112,11 @@ pub const Lexer = struct {
                 (ch == '!' and nch == '=') or
                 (ch == '<' and nch == '=') or
                 (ch == '>' and nch == '=') or
+                (ch == '<' and nch == '<') or
+                (ch == '>' and nch == '>') or
                 (ch == '&' and nch == '&') or
                 (ch == '|' and nch == '|'))
-            {
-                len = 2;
-            }
+            { len = 2; }
         }
         self.pos += len;
         self.col += len;
@@ -154,7 +126,7 @@ pub const Lexer = struct {
 
 fn isKeyword(ptr: [*]const u8, len: usize) bool {
     const words = [_][]const u8{
-        "fn", "hui", "if", "uebok", "return", "while",
+        "fn", "hui", "if", "uebok", "return", "while", "struct", "sizeof",
         "activity", "compose", "state", "viewmodel",
         "true", "false", "null", "int", "string", "bool", "void",
     };
@@ -162,12 +134,7 @@ fn isKeyword(ptr: [*]const u8, len: usize) bool {
         if (len == word.len) {
             var match = true;
             var i: usize = 0;
-            while (i < len) : (i += 1) {
-                if (ptr[i] != word[i]) {
-                    match = false;
-                    break;
-                }
-            }
+            while (i < len) : (i += 1) { if (ptr[i] != word[i]) { match = false; break; } }
             if (match) return true;
         }
     }

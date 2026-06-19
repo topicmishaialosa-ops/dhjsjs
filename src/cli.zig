@@ -1,13 +1,17 @@
 const parser_mod = @import("parser.zig");
 const compiler_mod = @import("compiler.zig");
 const compiler_rv = @import("compiler_rv.zig");
+const compiler_arm = @import("compiler_arm.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const codegen_rv = @import("codegen_rv.zig");
 const sys = @import("sys.zig");
 const utils = @import("utils.zig");
+const esp = @import("esp.zig");
+const axml = @import("axml.zig");
+const zip = @import("zip.zig");
 
-const Target = enum { x86_64, aarch64, riscv32 };
+const Target = enum { x86_64, aarch64, riscv32, apk };
 
 const BUFSIZE = 65536;
 const DEFAULT_SRC = "src/main.dhjsjs";
@@ -53,6 +57,7 @@ fn parseTarget(s: []const u8) ?Target {
     if (strEql(s, "x86_64")) return .x86_64;
     if (strEql(s, "aarch64")) return .aarch64;
     if (strEql(s, "riscv32") or strEql(s, "esp32") or strEql(s, "esp32c3")) return .riscv32;
+    if (strEql(s, "apk") or strEql(s, "android")) return .apk;
     return null;
 }
 
@@ -68,10 +73,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             if (!writeFile(out_path, cb.get())) return false;
         },
         .aarch64 => {
-            var cb = codegen_arm.CodeBuffer.init();
-            cb.movRImm64(codegen_arm.X8, 93);
-            cb.movRImm64(codegen_arm.X0, 0);
-            cb.svc(0);
+            var cb = compiler_arm.compile(prog, &parser.pool);
             cb.buildElf64();
             if (!writeFile(out_path, cb.get())) return false;
         },
@@ -80,6 +82,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             cb.buildElf32();
             if (!writeFile(out_path, cb.get())) return false;
         },
+        .apk => return false,
     }
     _ = sys.syscall2(SYS_CHMOD, @intFromPtr(out_path.ptr), 0x1ED);
     return true;
@@ -111,6 +114,8 @@ fn cmdBuild(args: []const []const u8) void {
         }
     }
 
+    if (target == .apk and strEql(out_file, DEFAULT_OUT)) out_file = "output/app.apk";
+
     var buf: [BUFSIZE]u8 = undefined;
     const src = readFile(src_file, buf[0..]) orelse {
         sys.writeStr(2, "error: cannot read '", 20);
@@ -119,7 +124,33 @@ fn cmdBuild(args: []const []const u8) void {
         sys.exit(1);
     };
 
-    if (!compileSource(src, target, out_file)) {
+    if (target == .apk) {
+        var parser = parser_mod.Parser.init(src.ptr, src.len);
+        const prog = parser.parse();
+
+        var cb = compiler_arm.compile(prog, &parser.pool);
+        cb.buildElf64Dyn();
+        const elf_data = cb.get();
+
+        var axml_buf: [4096]u8 = undefined;
+        const axml_len = axml.buildManifest("com.dhjsjs.app", "main", 26, 34, &axml_buf);
+
+        var apk_buf: [65536]u8 = undefined;
+        var names = [_][]const u8{
+            "AndroidManifest.xml",
+            "lib/arm64-v8a/libmain.so",
+        };
+        var datas = [_][]const u8{
+            axml_buf[0..axml_len],
+            elf_data,
+        };
+        const apk_len = zip.buildApk(&datas, &names, &apk_buf);
+
+        if (!writeFile(out_file, apk_buf[0..apk_len])) {
+            sys.writeStr(2, "error: write APK failed\n", 24);
+            sys.exit(1);
+        }
+    } else if (!compileSource(src, target, out_file)) {
         sys.writeStr(2, "error: compilation failed\n", 26);
         sys.exit(1);
     }
@@ -245,7 +276,7 @@ fn cmdHelp() void {
         \\dhjsjs compiler v0.2
         \\
         \\Usage:
-        \\  dhjsjs_cc build [file] [-o output] [--target x86_64|aarch64|riscv32|esp32]
+        \\  dhjsjs_cc build [file] [-o output] [--target x86_64|aarch64|riscv32|esp32|apk]
         \\  dhjsjs_cc run [file]
         \\  dhjsjs_cc new <project>
         \\  dhjsjs_cc flash [file] --target esp32 [--port /dev/ttyUSB0]
@@ -257,6 +288,7 @@ fn cmdHelp() void {
         \\  riscv32  - RISC-V 32-bit (ESP32-C3/C6)
         \\  esp32    - alias for riscv32
         \\  esp32c3  - alias for riscv32
+        \\  apk      - Android APK (aarch64)
         ;
     sys.writeStr(1, help.ptr, help.len);
 }
@@ -446,6 +478,36 @@ fn genExprC(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.Ast
             if (operand != parser_mod.NO_NODE) p = genExprC(operand, pool, buf, p, vars, vc);
             p = genStr(")", buf, p);
         },
+        .field_access => {
+            const base = n.first_child;
+            const field = n.name_start[0..n.name_len];
+            if (base != parser_mod.NO_NODE) p = genExprC(base, pool, buf, p, vars, vc);
+            p = genStr(".", buf, p);
+            for (field) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
+        },
+        .array_index => {
+            const arr2 = n.first_child;
+            const idx2 = if (arr2 != parser_mod.NO_NODE) pool[@as(usize, @intCast(arr2))].next_sibling else parser_mod.NO_NODE;
+            if (arr2 != parser_mod.NO_NODE) p = genExprC(arr2, pool, buf, p, vars, vc);
+            p = genStr("[", buf, p);
+            if (idx2 != parser_mod.NO_NODE) p = genExprC(idx2, pool, buf, p, vars, vc);
+            p = genStr("]", buf, p);
+        },
+        .addr_of => {
+            p = genStr("(&", buf, p);
+            if (n.first_child != parser_mod.NO_NODE) p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            p = genStr(")", buf, p);
+        },
+        .deref => {
+            p = genStr("(*", buf, p);
+            if (n.first_child != parser_mod.NO_NODE) p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            p = genStr(")", buf, p);
+        },
+        .sizeof_expr => {
+            p = genStr("sizeof(", buf, p);
+            if (n.first_child != parser_mod.NO_NODE) p = genExprC(n.first_child, pool, buf, p, vars, vc);
+            p = genStr(")", buf, p);
+        },
         .call => {
             const cname = n.name_start[0..n.name_len];
             for (cname) |c| { if (p < buf.len) { buf[p] = c; p += 1; } }
@@ -510,39 +572,9 @@ fn cmdFlash(args: []const []const u8) void {
         sys.exit(1);
     }
 
-    // Call esptool.py to flash
-    sys.writeStr(1, "flashing to ESP32 via ", 22);
-    sys.writeStr(1, port.ptr, port.len);
-    sys.writeStr(1, "...\n", 4);
-
-    var argv: [5][*]const u8 = undefined;
-    var apath: [256]u8 = @splat(0);
-    var ai2: usize = 0;
-    for ("/usr/bin/esptool.py") |c| { apath[ai2] = c; ai2 += 1; }
-    argv[0] = &apath;
-    argv[1] = "--chip";
-    argv[2] = "esp32c3";
-    argv[3] = "write_flash";
-    argv[4] = "0x0";
-
-    // Build args with port
-    var full_argv: [8][*]const u8 = undefined;
-    full_argv[0] = &apath;
-    full_argv[1] = "--chip";
-    full_argv[2] = "esp32c3";
-    full_argv[3] = "--port";
-    var pbuf: [256]u8 = @splat(0);
-    var pi2: usize = 0;
-    for (port) |c| { pbuf[pi2] = c; pi2 += 1; }
-    full_argv[4] = &pbuf;
-    full_argv[5] = "write_flash";
-    full_argv[6] = "0x0";
-    full_argv[7] = elf_path[0..].ptr;
-
-    const SYS_EXECVE: usize = 59;
-    _ = sys.syscall3(SYS_EXECVE, @intFromPtr(&full_argv), @intFromPtr(&full_argv), 0);
-    sys.writeStr(2, "error: esptool.py exec failed (install esptool)\n", 49);
-    sys.exit(1);
+    if (!esp.flashElf(port, elf_path[0 .. elf_path.len - 1 :0])) {
+        sys.exit(1);
+    }
 }
 
 pub fn main() void {

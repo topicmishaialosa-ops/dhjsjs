@@ -1,0 +1,4 @@
+fn main() int {
+    hui x = 0;
+    return sizeof x + 0;
+}

@@ -17,28 +17,30 @@ fn strToInt(s: []const u8) i64 {
 
 const Var = struct { name: []const u8, off: i32 };
 const MAX_VARS = 64;
+const NO_NODE: parser_mod.NodeIdx = -1;
 
 pub fn compile(prog_root: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode) cg.CodeBuffer {
-    _ = prog_root;
     var cb = cg.CodeBuffer.init();
     var vars: [MAX_VARS]Var = undefined;
     var vc: usize = 0;
     var stack_off: i32 = 0;
 
+    if (prog_root == parser_mod.NO_NODE) {
+        cb.li(cg.A7, 93);
+        cb.li(cg.A0, 0);
+        cb.ecall();
+        return cb;
+    }
+
+    const prog = &pool[@as(usize, @intCast(prog_root))];
     var main_idx: parser_mod.NodeIdx = parser_mod.NO_NODE;
-    var pi: usize = 0;
-    while (pi < parser_mod.MAX_NODES) : (pi += 1) {
-        const n = &pool[pi];
-        if (n.kind == .program) {
-            var ch = n.first_child;
-            while (ch != parser_mod.NO_NODE) {
-                const cn = &pool[@as(usize, @intCast(ch))];
-                if (cn.kind == .fn_decl and eq(cn.name_start[0..cn.name_len], "main")) {
-                    main_idx = ch;
-                }
-                ch = cn.next_sibling;
-            }
+    var ch = prog.first_child;
+    while (ch != parser_mod.NO_NODE) {
+        const cn = &pool[@as(usize, @intCast(ch))];
+        if (cn.kind == .fn_decl and eq(cn.name_start[0..cn.name_len], "main")) {
+            main_idx = ch;
         }
+        ch = cn.next_sibling;
     }
 
     if (main_idx == parser_mod.NO_NODE) {
@@ -54,20 +56,14 @@ pub fn compile(prog_root: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parse
     cb.ecall();
 
     var main_body_pos: usize = 0;
-    pi = 0;
-    while (pi < parser_mod.MAX_NODES) : (pi += 1) {
-        const n = &pool[pi];
-        if (n.kind == .program) {
-            var ch = n.first_child;
-            while (ch != parser_mod.NO_NODE) {
-                const cn = &pool[@as(usize, @intCast(ch))];
-                if (cn.kind == .fn_decl) {
-                    if (ch == main_idx) main_body_pos = cb.len;
-                    compileFn(cn, pool, &cb, &vars, &vc, &stack_off);
-                }
-                ch = cn.next_sibling;
-            }
+    ch = prog.first_child;
+    while (ch != parser_mod.NO_NODE) {
+        const cn = &pool[@as(usize, @intCast(ch))];
+        if (cn.kind == .fn_decl) {
+            if (ch == main_idx) main_body_pos = cb.len;
+            compileFn(cn, pool, &cb, &vars, &vc, &stack_off);
         }
+        ch = cn.next_sibling;
     }
 
     cb.patchJal(call_pos, main_body_pos);
@@ -82,7 +78,14 @@ fn compileFn(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_m
         if (cn.kind == .block) {
             var ch2 = cn.first_child;
             while (ch2 != parser_mod.NO_NODE) {
-                if (pool[@as(usize, @intCast(ch2))].kind == .var_decl) var_count += 1;
+                const st = &pool[@as(usize, @intCast(ch2))];
+                if (st.kind == .var_decl) {
+                    var arr_sz: i32 = 1;
+                    if (st.val_len > 0) {
+                        arr_sz = @as(i32, @intCast(strToInt(st.val_start[0..st.val_len])));
+                    }
+                    var_count += @as(usize, @intCast(@max(1, arr_sz)));
+                }
                 ch2 = pool[@as(usize, @intCast(ch2))].next_sibling;
             }
         }
@@ -135,32 +138,43 @@ fn compileStmt(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.
         },
         .var_decl => {
             const name = n.name_start[0..n.name_len];
-            stack_off.* -= 4;
-            const off = stack_off.*;
-            if (vc.* < MAX_VARS) {
-                vars[vc.*] = Var{ .name = name, .off = off };
-                vc.* += 1;
+            var arr_sz: i32 = 1;
+            const init_expr: parser_mod.NodeIdx = n.first_child;
+            if (n.val_len > 0) {
+                arr_sz = @as(i32, @intCast(strToInt(n.val_start[0..n.val_len])));
             }
-            if (n.first_child != parser_mod.NO_NODE) {
-                compileExprNode(n.first_child, pool, cb, vars, vc);
-            } else {
-                cb.li(cg.A0, 0);
+            const total_slots: i32 = @max(1, arr_sz);
+            var si: i32 = 0;
+            while (si < total_slots) : (si += 1) {
+                stack_off.* -= 4;
+                const off = stack_off.*;
+                if (vc.* < MAX_VARS) {
+                    vars[vc.*] = Var{ .name = name, .off = off };
+                    vc.* += 1;
+                }
+                if (si == 0 and init_expr != parser_mod.NO_NODE) {
+                    compileExprNode(init_expr, pool, cb, vars, vc);
+                    cb.sw(cg.A0, cg.FP, off);
+                } else if (si == 0 and init_expr == parser_mod.NO_NODE and total_slots == 1) {
+                    cb.li(cg.A0, 0);
+                    cb.sw(cg.A0, cg.FP, off);
+                }
             }
-            cb.sw(cg.A0, cg.FP, off);
         },
         .call => compileCall(n, pool, cb, vars, vc),
         .assign => {
-            const name = n.name_start[0..n.name_len];
-            const off = findVar(vars, vc.*, name);
             if (n.first_child != parser_mod.NO_NODE) {
                 compileExprNode(n.first_child, pool, cb, vars, vc);
             } else {
                 cb.li(cg.A0, 0);
             }
+            const name = n.name_start[0..n.name_len];
+            const off = findVarOffset(vars, vc.*, name);
             if (off) |o| cb.sw(cg.A0, cg.FP, o);
         },
         .if_stmt => compileIf(n, pool, cb, vars, vc, stack_off),
         .while_stmt => compileWhile(n, pool, cb, vars, vc, stack_off),
+        .struct_decl => {},
         else => {
             var ch = n.first_child;
             while (ch != parser_mod.NO_NODE) {
@@ -178,7 +192,7 @@ fn compileExprNode(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
         .int_lit => cb.li(cg.A0, @as(i32, @intCast(strToInt(n.val_start[0..n.val_len])))),
         .str_lit => cb.li(cg.A0, 0),
         .ident => {
-            if (findVar(vars, vc.*, n.name_start[0..n.name_len])) |off| {
+            if (findVarOffset(vars, vc.*, n.name_start[0..n.name_len])) |off| {
                 cb.lw(cg.A0, cg.FP, off);
             } else {
                 cb.li(cg.A0, 0);
@@ -186,7 +200,48 @@ fn compileExprNode(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
         },
         .binary_op => compileBinaryOp(n, pool, cb, vars, vc),
         .unary_op => compileUnaryOp(n, pool, cb, vars, vc),
+        .field_access => compileFieldAccess(n, pool, cb, vars, vc),
+        .array_index => compileArrayIndex(n, pool, cb, vars, vc),
+        .addr_of => compileAddrOf(n, pool, cb, vars, vc),
+        .deref => compileDeref(n, pool, cb, vars, vc),
+        .sizeof_expr => compileSizeof(n, pool, cb, vars, vc),
         else => cb.li(cg.A0, 0),
+    }
+}
+
+fn compileExprAddr(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize) void {
+    if (idx == parser_mod.NO_NODE) { cb.li(cg.A0, 0); return; }
+    const n = &pool[@as(usize, @intCast(idx))];
+    switch (n.kind) {
+        .ident => {
+            if (findVarOffset(vars, vc.*, n.name_start[0..n.name_len])) |off| {
+                cb.addi(cg.A0, cg.FP, off);
+            } else { cb.li(cg.A0, 0); }
+        },
+        .deref => {
+            compileExprNode(n.first_child, pool, cb, vars, vc);
+        },
+        .field_access => {
+            compileExprAddr(n.first_child, pool, cb, vars, vc);
+            const field = n.name_start[0..n.name_len];
+            const field_off = findFieldOffset(pool, field);
+            if (field_off > 0) cb.addi(cg.A0, cg.A0, field_off);
+        },
+        .array_index => {
+            compileExprAddr(n.first_child, pool, cb, vars, vc);
+            const idx_node = if (n.first_child != parser_mod.NO_NODE)
+                pool[@as(usize, @intCast(n.first_child))].next_sibling
+            else
+                parser_mod.NO_NODE;
+            if (idx_node != parser_mod.NO_NODE) {
+                cb.pushR(cg.A0);
+                compileExprNode(idx_node, pool, cb, vars, vc);
+                cb.mv(cg.T0, cg.A0);
+                cb.popR(cg.A0);
+                cb.add(cg.A0, cg.A0, cg.T0);
+            }
+        },
+        else => compileExprNode(idx, pool, cb, vars, vc),
     }
 }
 
@@ -279,6 +334,42 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
     cb.li(cg.A0, 0);
 }
 
+fn compileFieldAccess(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize) void {
+    compileExprAddr(n.first_child, pool, cb, vars, vc);
+    const field = n.name_start[0..n.name_len];
+    const field_off = findFieldOffset(pool, field);
+    if (field_off > 0) cb.addi(cg.A0, cg.A0, field_off);
+    cb.lw(cg.A0, cg.A0, 0);
+}
+
+fn compileArrayIndex(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize) void {
+    const arr = n.first_child;
+    const idx = if (arr != parser_mod.NO_NODE) pool[@as(usize, @intCast(arr))].next_sibling else parser_mod.NO_NODE;
+    if (arr == parser_mod.NO_NODE or idx == parser_mod.NO_NODE) { cb.li(cg.A0, 0); return; }
+
+    compileExprAddr(arr, pool, cb, vars, vc);
+    cb.pushR(cg.A0);
+    compileExprNode(idx, pool, cb, vars, vc);
+    cb.mv(cg.T0, cg.A0);
+    cb.popR(cg.A0);
+    cb.add(cg.A0, cg.A0, cg.T0);
+    cb.lw(cg.A0, cg.A0, 0);
+}
+
+fn compileAddrOf(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize) void {
+    compileExprAddr(n.first_child, pool, cb, vars, vc);
+}
+
+fn compileDeref(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize) void {
+    compileExprNode(n.first_child, pool, cb, vars, vc);
+    cb.lw(cg.A0, cg.A0, 0);
+}
+
+fn compileSizeof(_n: *const parser_mod.AstNode, _pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, _vars: *[MAX_VARS]Var, _vc: *usize) void {
+    _ = _n; _ = _pool; _ = _vars; _ = _vc;
+    cb.li(cg.A0, 4);
+}
+
 fn compileIf(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, stack_off: *i32) void {
     const cond = n.first_child;
     const then_blk = if (cond != parser_mod.NO_NODE) pool[@as(usize, @intCast(cond))].next_sibling else parser_mod.NO_NODE;
@@ -323,7 +414,29 @@ fn compileWhile(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parse
     cb.patchBranch(beq_pos, end_pos);
 }
 
-fn findVar(vars: *[MAX_VARS]Var, count: usize, name: []const u8) ?i32 {
+fn findFieldOffset(pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, field: []const u8) i32 {
+    var pi: usize = 0;
+    while (pi < parser_mod.MAX_NODES) : (pi += 1) {
+        const n = &pool[pi];
+        if (n.kind == .struct_decl) {
+            var fi: i32 = 0;
+            var ch = n.first_child;
+            while (ch != parser_mod.NO_NODE) {
+                const cn = &pool[@as(usize, @intCast(ch))];
+                if (cn.kind == .var_decl) {
+                    if (eq(cn.name_start[0..cn.name_len], field)) {
+                        return fi * 4;
+                    }
+                    fi += 1;
+                }
+                ch = cn.next_sibling;
+            }
+        }
+    }
+    return 0;
+}
+
+fn findVarOffset(vars: *[MAX_VARS]Var, count: usize, name: []const u8) ?i32 {
     var i: usize = 0;
     while (i < count) : (i += 1) {
         if (eq(vars[i].name, name)) return vars[i].off;

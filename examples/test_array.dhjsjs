@@ -1,0 +1,5 @@
+fn main() int {
+    hui arr[4] = 0;
+    arr = 42;
+    return arr;
+}

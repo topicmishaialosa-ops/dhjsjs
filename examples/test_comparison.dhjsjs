@@ -1,0 +1,9 @@
+fn main() int {
+    hui a = 5;
+    hui b = 3;
+    hui c = a > b;
+    if c {
+        return 1;
+    }
+    return 0;
+}

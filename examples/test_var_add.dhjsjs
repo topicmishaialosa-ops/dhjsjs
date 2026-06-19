@@ -1,0 +1,6 @@
+fn main() int {
+    hui x = 10;
+    hui y = 20;
+    hui z = x + y;
+    return z;
+}

@@ -54,17 +54,10 @@ fn buildProject(ide: *ide_mod.IdeState) void {
 
     const src = ide.content[0..ide.clen];
     var parser = parser_mod.Parser.init(src.ptr, src.len);
-    _ = parser.parse();
+    const prog = parser.parse();
 
-    var cgen = compiler_mod.Compiler.init(&parser.pool);
-    cgen.compileAsm();
-    writeFile("output/out.asm\x00", cgen.getOutput());
-
-    var cb = codegen_mod.CodeBuffer.init();
-    cb.movRImm64(codegen_mod.RAX, 60);
-    cb.xorRR(codegen_mod.RDI, codegen_mod.RDI);
-    cb.syscall();
-    codegen_mod.buildElf64(&cb);
+    var cb = compiler_mod.compile(prog, &parser.pool);
+    cb.buildElf64();
     writeFile("output/out.bin\x00", cb.get());
 
     var cb_arm = codegen_arm.CodeBuffer.init();

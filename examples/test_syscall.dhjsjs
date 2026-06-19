@@ -1,0 +1,5 @@
+fn main() int {
+    hui nr = 39;
+    hui r = syscall(nr, 0, 0, 0, 0, 0, 0);
+    return r;
+}

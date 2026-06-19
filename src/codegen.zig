@@ -220,7 +220,19 @@ pub const CodeBuffer = struct {
         self.modrm(3, 2, r);
     }
 
-    pub fn pushfq(self: *CodeBuffer) void {
+    pub fn shlRcl(self: *CodeBuffer, r: u8) void {
+    self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+    self.byte(0xD3);
+    self.modrm(3, 4, r);
+}
+
+pub fn shrRcl(self: *CodeBuffer, r: u8) void {
+    self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+    self.byte(0xD3);
+    self.modrm(3, 5, r);
+}
+
+pub fn pushfq(self: *CodeBuffer) void {
         self.byte(0x9C);
     }
 
@@ -315,19 +327,17 @@ pub const CodeBuffer = struct {
     }
 
     pub fn leaRMem(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
+        self.rex_wb(if (r >= 8) 1 else 0, if (base >= 8) 1 else 0);
         if (off == 0) {
-            self.rex_if(r, base);
             self.byte(0x8D);
             self.modrm(0, r, base);
             if (base == RSP or base == R12) self.byte(0x24);
         } else if (off >= -128 and off <= 127) {
-            self.rex_if(r, base);
             self.byte(0x8D);
             self.modrm(1, r, base);
             if (base == RSP or base == R12) self.byte(0x24);
             self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
         } else {
-            self.rex_if(r, base);
             self.byte(0x8D);
             self.modrm(2, r, base);
             if (base == RSP or base == R12) self.byte(0x24);
