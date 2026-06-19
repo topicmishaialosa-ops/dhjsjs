@@ -9,9 +9,12 @@ pub const NodeKind = enum(u8) {
     viewmodel_decl,
     struct_decl,
     var_decl,
+    struct_var_decl,
     ret_stmt,
     if_stmt,
     while_stmt,
+    break_stmt,
+    continue_stmt,
     block,
     call,
     assign,
@@ -24,7 +27,7 @@ pub const NodeKind = enum(u8) {
     array_index,
     addr_of,
     deref,
-sizeof_expr,
+    sizeof_expr,
     store,
 };
 
@@ -235,6 +238,9 @@ pub const Parser = struct {
         if (self.tok.kind == .keyword and self.tokMatch("hui")) {
             return self.parseVarDecl();
         }
+        if (self.tok.kind == .keyword and self.tokMatch("const")) {
+            return self.parseVarDecl();
+        }
         if (self.tok.kind == .keyword and self.tokMatch("return")) {
             return self.parseReturnStmt();
         }
@@ -243,6 +249,19 @@ pub const Parser = struct {
         }
         if (self.tok.kind == .keyword and self.tokMatch("while")) {
             return self.parseWhileStmt();
+        }
+        if (self.tok.kind == .keyword and self.tokMatch("break")) {
+            self.eat();
+            if (self.tokMatch(";")) self.eat();
+            return self.allocNode(.break_stmt, "", 0, "", 0, self.tok.line, self.tok.col);
+        }
+        if (self.tok.kind == .keyword and self.tokMatch("continue")) {
+            self.eat();
+            if (self.tokMatch(";")) self.eat();
+            return self.allocNode(.continue_stmt, "", 0, "", 0, self.tok.line, self.tok.col);
+        }
+        if (self.tok.kind == .keyword and self.tokMatch("struct")) {
+            return self.parseStructVarDecl();
         }
         if (self.tokMatch("{")) {
             self.eat();
@@ -274,6 +293,18 @@ pub const Parser = struct {
     }
     if (self.tokMatch(";")) self.eat();
     return n;
+    }
+
+    fn parseStructVarDecl(self: *Parser) NodeIdx {
+        const line = self.tok.line; const col = self.tok.col;
+        self.eat(); // skip 'struct'
+        const type_name = self.tokStr(); // struct type name
+        self.eat();
+        const var_name = self.tokStr(); // variable name
+        self.eat();
+        const n = self.allocNode(.struct_var_decl, type_name.ptr, type_name.len, var_name.ptr, var_name.len, line, col);
+        if (self.tokMatch(";")) self.eat();
+        return n;
     }
 
     fn parseReturnStmt(self: *Parser) NodeIdx {
@@ -347,7 +378,7 @@ pub const Parser = struct {
         if (self.tokMatch("==") or self.tokMatch("!=") or self.tokMatch("<") or self.tokMatch(">") or self.tokMatch("<=") or self.tokMatch(">=")) return 7;
         if (self.tokMatch("<<") or self.tokMatch(">>")) return 8;
         if (self.tokMatch("+") or self.tokMatch("-")) return 9;
-        if (self.tokMatch("*") or self.tokMatch("/")) return 10;
+        if (self.tokMatch("*") or self.tokMatch("/") or self.tokMatch("%")) return 10;
         if (self.tokMatch("[")) return 11;
         if (self.tokMatch(".")) return 12;
         return 0;

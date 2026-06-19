@@ -82,9 +82,18 @@ pub const Lexer = struct {
 
     fn readNumber(self: *Lexer, line: usize, col: usize) Token {
         const start = self.pos;
-        while (self.pos < self.len and utils.isDigit(self.source[self.pos])) {
-            self.pos += 1;
-            self.col += 1;
+        if (self.pos + 2 < self.len and self.source[self.pos] == '0' and self.source[self.pos + 1] == 'x') {
+            self.pos += 2;
+            self.col += 2;
+            while (self.pos < self.len and utils.isHexDigit(self.source[self.pos])) {
+                self.pos += 1;
+                self.col += 1;
+            }
+        } else {
+            while (self.pos < self.len and utils.isDigit(self.source[self.pos])) {
+                self.pos += 1;
+                self.col += 1;
+            }
         }
         return Token{ .kind = .integer, .start = self.source + start, .len = self.pos - start, .line = line, .col = col };
     }
@@ -129,6 +138,7 @@ fn isKeyword(ptr: [*]const u8, len: usize) bool {
         "fn", "hui", "if", "uebok", "return", "while", "struct", "sizeof",
         "activity", "compose", "state", "viewmodel",
         "true", "false", "null", "int", "string", "bool", "void",
+        "break", "continue", "const",
     };
     for (words) |word| {
         if (len == word.len) {

@@ -1,0 +1,66 @@
+fn main() int {
+    hui s1 = syscall(64, 1, "  DHJSJS on Android v0.2\n", 26, 0, 0, 0);
+    hui s2 = syscall(64, 1, "  ========================\n", 27, 0, 0, 0);
+    hui s3 = syscall(64, 1, "\n", 1, 0, 0, 0);
+
+    hui s4 = syscall(64, 1, "  Hardware: ARM64 Android\n", 26, 0, 0, 0);
+    hui s5 = syscall(64, 1, "  Language: dhjsjs\n", 20, 0, 0, 0);
+    hui s6 = syscall(64, 1, "  Target:   APK\n", 17, 0, 0, 0);
+    hui s7 = syscall(64, 1, "\n", 1, 0, 0, 0);
+
+    hui t = syscall(64, 1, "  Counting down: ", 18, 0, 0, 0);
+    hui i = 10;
+    while i > 0 {
+        hui buf[10];
+        hui bi = 0;
+        hui v = i;
+        while v > 0 {
+            buf[bi] = 48 + (v % 10);
+            bi = bi + 1;
+            v = v / 10;
+        }
+        hui bj = 0;
+        while bj < bi {
+            hui addr = &buf;
+            hui c = buf[bi - 1 - bj];
+            buf[0] = c;
+            hui w = syscall(64, 1, addr, 1, 0, 0, 0);
+            bj = bj + 1;
+        }
+        hui sp = syscall(64, 1, " ", 1, 0, 0, 0);
+        i = i - 1;
+    }
+    hui s8 = syscall(64, 1, "\n", 1, 0, 0, 0);
+
+    hui s9 = syscall(64, 1, "  Computing 2^10...\n", 21, 0, 0, 0);
+    hui pow = 1;
+    hui pi = 0;
+    while pi < 10 {
+        pow = pow * 2;
+        pi = pi + 1;
+    }
+    hui pbuf[10];
+    hui ppi = 0;
+    hui pv = pow;
+    while pv > 0 {
+        pbuf[ppi] = 48 + (pv % 10);
+        ppi = ppi + 1;
+        pv = pv / 10;
+    }
+    hui pj = 0;
+    while pj < ppi {
+        hui addr2 = &pbuf;
+        hui pc = pbuf[ppi - 1 - pj];
+        pbuf[0] = pc;
+        hui w2 = syscall(64, 1, addr2, 1, 0, 0, 0);
+        pj = pj + 1;
+    }
+    hui s10 = syscall(64, 1, "\n\n", 2, 0, 0, 0);
+
+    hui s11 = syscall(64, 1, "  Status: Android APK works!\n", 29, 0, 0, 0);
+    hui s12 = syscall(64, 1, "  Exit:   42\n", 14, 0, 0, 0);
+    hui s13 = syscall(64, 1, "\n", 1, 0, 0, 0);
+
+    syscall(60, 42, 0, 0, 0, 0, 0);
+    return 0;
+}

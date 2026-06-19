@@ -11,7 +11,18 @@ fn eq(a: []const u8, b: []const u8) bool {
 fn strToInt(s: []const u8) i64 {
     var v: i64 = 0;
     var i: usize = 0;
-    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) v = v * 10 + (s[i] - '0');
+    if (s.len > 2 and s[0] == '0' and (s[1] == 'x' or s[1] == 'X')) {
+        i = 2;
+        while (i < s.len) : (i += 1) {
+            const c = s[i];
+            v <<= 4;
+            if (c >= '0' and c <= '9') { v |= @as(i64, c - '0'); }
+            if (c >= 'a' and c <= 'f') { v |= @as(i64, c - 'a' + 10); }
+            if (c >= 'A' and c <= 'F') { v |= @as(i64, c - 'A' + 10); }
+        }
+    } else {
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) v = v * 10 + (s[i] - '0');
+    }
     return v;
 }
 
@@ -145,12 +156,16 @@ fn compileStmt(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.
             }
             const total_slots: i32 = @max(1, arr_sz);
             var si: i32 = 0;
+            var first_off: i32 = 0;
             while (si < total_slots) : (si += 1) {
                 stack_off.* -= 4;
                 const off = stack_off.*;
-                if (vc.* < MAX_VARS) {
-                    vars[vc.*] = Var{ .name = name, .off = off };
-                    vc.* += 1;
+                if (si == 0) {
+                    first_off = off;
+                    if (vc.* < MAX_VARS) {
+                        vars[vc.*] = Var{ .name = name, .off = off };
+                        vc.* += 1;
+                    }
                 }
                 if (si == 0 and init_expr != parser_mod.NO_NODE) {
                     compileExprNode(init_expr, pool, cb, vars, vc);
@@ -237,8 +252,9 @@ fn compileExprAddr(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
                 cb.pushR(cg.A0);
                 compileExprNode(idx_node, pool, cb, vars, vc);
                 cb.mv(cg.T0, cg.A0);
+                cb.slli(cg.T0, cg.T0, 3);
                 cb.popR(cg.A0);
-                cb.add(cg.A0, cg.A0, cg.T0);
+                cb.sub(cg.A0, cg.A0, cg.T0);
             }
         },
         else => compileExprNode(idx, pool, cb, vars, vc),
@@ -268,6 +284,8 @@ fn compileBinaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]pa
         cb.mul(cg.A0, cg.A0, cg.T0);
     } else if (eq(op, "/")) {
         cb.div(cg.A0, cg.A0, cg.T0);
+    } else if (eq(op, "%")) {
+        cb.rem(cg.A0, cg.A0, cg.T0);
     } else if (eq(op, "==")) {
         cb.sub(cg.T1, cg.A0, cg.T0);
         cb.seqz(cg.A0, cg.T1);
@@ -351,8 +369,9 @@ fn compileArrayIndex(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]
     cb.pushR(cg.A0);
     compileExprNode(idx, pool, cb, vars, vc);
     cb.mv(cg.T0, cg.A0);
+    cb.slli(cg.T0, cg.T0, 3);
     cb.popR(cg.A0);
-    cb.add(cg.A0, cg.A0, cg.T0);
+    cb.sub(cg.A0, cg.A0, cg.T0);
     cb.lw(cg.A0, cg.A0, 0);
 }
 

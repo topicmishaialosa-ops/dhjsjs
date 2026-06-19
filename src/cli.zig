@@ -11,7 +11,16 @@ const esp = @import("esp.zig");
 const axml = @import("axml.zig");
 const zip = @import("zip.zig");
 
-const Target = enum { x86_64, aarch64, riscv32, apk };
+const Target = enum { x86_64, aarch64, riscv32, apk, raw, native, windows };
+
+fn hostTarget() Target {
+    return switch (@import("builtin").target.cpu.arch) {
+        .x86_64 => .x86_64,
+        .aarch64 => .aarch64,
+        .riscv32 => .riscv32,
+        else => .x86_64,
+    };
+}
 
 const BUFSIZE = 65536;
 const DEFAULT_SRC = "src/main.dhjsjs";
@@ -56,8 +65,11 @@ fn strEql(a: []const u8, b: []const u8) bool {
 fn parseTarget(s: []const u8) ?Target {
     if (strEql(s, "x86_64")) return .x86_64;
     if (strEql(s, "aarch64")) return .aarch64;
+    if (strEql(s, "raw")) return .raw;
+    if (strEql(s, "native")) return .native;
     if (strEql(s, "riscv32") or strEql(s, "esp32") or strEql(s, "esp32c3")) return .riscv32;
     if (strEql(s, "apk") or strEql(s, "android")) return .apk;
+    if (strEql(s, "windows") or strEql(s, "win") or strEql(s, "exe")) return .windows;
     return null;
 }
 
@@ -66,7 +78,8 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
     const prog = parser.parse();
 
     const SYS_CHMOD: usize = 90;
-    switch (target) {
+    const effective = if (target == .native) hostTarget() else target;
+    switch (effective) {
         .x86_64 => {
             var cb = compiler_mod.compile(prog, &parser.pool);
             cb.buildElf64();
@@ -83,6 +96,16 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             if (!writeFile(out_path, cb.get())) return false;
         },
         .apk => return false,
+        .windows => {
+            var cb = compiler_mod.compile(prog, &parser.pool);
+            cb.buildPe64();
+            if (!writeFile(out_path, cb.get())) return false;
+        },
+        .raw => {
+            var cb = compiler_arm.compile(prog, &parser.pool);
+            if (!writeFile(out_path, cb.get())) return false;
+        },
+        .native => unreachable,
     }
     _ = sys.syscall2(SYS_CHMOD, @intFromPtr(out_path.ptr), 0x1ED);
     return true;
@@ -91,7 +114,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
 fn cmdBuild(args: []const []const u8) void {
     var src_file: []const u8 = DEFAULT_SRC;
     var out_file: []const u8 = DEFAULT_OUT;
-    var target: Target = .x86_64;
+    var target: Target = .native;
 
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
@@ -114,7 +137,9 @@ fn cmdBuild(args: []const []const u8) void {
         }
     }
 
+    if (target == .native) target = hostTarget();
     if (target == .apk and strEql(out_file, DEFAULT_OUT)) out_file = "output/app.apk";
+    if (target == .windows and strEql(out_file, DEFAULT_OUT)) out_file = "output/out.exe";
 
     var buf: [BUFSIZE]u8 = undefined;
     const src = readFile(src_file, buf[0..]) orelse {
@@ -128,7 +153,7 @@ fn cmdBuild(args: []const []const u8) void {
         var parser = parser_mod.Parser.init(src.ptr, src.len);
         const prog = parser.parse();
 
-        var cb = compiler_arm.compile(prog, &parser.pool);
+        var cb = compiler_arm.compileEx(prog, &parser.pool, true);
         cb.buildElf64Dyn();
         const elf_data = cb.get();
 
@@ -162,7 +187,7 @@ fn cmdBuild(args: []const []const u8) void {
 
 fn cmdRun(args: []const []const u8) void {
     var src_file: []const u8 = DEFAULT_SRC;
-    var target: Target = .x86_64;
+    var target: Target = .native;
 
     var i: usize = 2;
     while (i < args.len) : (i += 1) {
@@ -182,6 +207,7 @@ fn cmdRun(args: []const []const u8) void {
         }
     }
 
+    if (target == .native) target = hostTarget();
     if (target != .x86_64) {
         sys.writeStr(2, "error: run only supports x86_64 target\n", 39);
         sys.exit(1);
@@ -276,18 +302,20 @@ fn cmdHelp() void {
         \\dhjsjs compiler v0.2
         \\
         \\Usage:
-        \\  dhjsjs_cc build [file] [-o output] [--target x86_64|aarch64|riscv32|esp32|apk]
+        \\  dhjsjs_cc build [file] [-o output] [--target x86_64|aarch64|riscv32|esp32|native|apk]
         \\  dhjsjs_cc run [file]
         \\  dhjsjs_cc new <project>
         \\  dhjsjs_cc flash [file] --target esp32 [--port /dev/ttyUSB0]
         \\  dhjsjs_cc transpile [file] [-o output]
         \\
         \\Targets:
-        \\  x86_64   - Linux x86_64 (default)
+        \\  x86_64   - Linux x86_64
         \\  aarch64  - Linux ARM64
         \\  riscv32  - RISC-V 32-bit (ESP32-C3/C6)
         \\  esp32    - alias for riscv32
         \\  esp32c3  - alias for riscv32
+        \\  windows  - Windows x86_64 (.exe)
+        \\  native   - auto-detect host architecture (default)
         \\  apk      - Android APK (aarch64)
         ;
     sys.writeStr(1, help.ptr, help.len);

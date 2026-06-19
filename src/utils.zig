@@ -6,6 +6,10 @@ pub fn isDigit(ch: u8) bool {
     return ch >= '0' and ch <= '9';
 }
 
+pub fn isHexDigit(ch: u8) bool {
+    return isDigit(ch) or (ch >= 'a' and ch <= 'f') or (ch >= 'A' and ch <= 'F');
+}
+
 pub fn isAlphaNum(ch: u8) bool {
     return isAlpha(ch) or isDigit(ch) or ch == '_';
 }

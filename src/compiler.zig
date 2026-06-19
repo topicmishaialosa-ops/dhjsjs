@@ -11,7 +11,18 @@ fn eq(a: []const u8, b: []const u8) bool {
 fn strToInt(s: []const u8) i64 {
     var v: i64 = 0;
     var i: usize = 0;
-    while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) v = v * 10 + (s[i] - '0');
+    if (s.len > 2 and s[0] == '0' and (s[1] == 'x' or s[1] == 'X')) {
+        i = 2;
+        while (i < s.len) : (i += 1) {
+            const c = s[i];
+            v <<= 4;
+            if (c >= '0' and c <= '9') { v |= @as(i64, c - '0'); }
+            if (c >= 'a' and c <= 'f') { v |= @as(i64, c - 'a' + 10); }
+            if (c >= 'A' and c <= 'F') { v |= @as(i64, c - 'A' + 10); }
+        }
+    } else {
+        while (i < s.len and s[i] >= '0' and s[i] <= '9') : (i += 1) v = v * 10 + (s[i] - '0');
+    }
     return v;
 }
 
@@ -71,34 +82,48 @@ pub fn compile(prog_root: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parse
     return cb;
 }
 
-fn compileFn(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, stack_off: *i32) void {
-    var var_count: usize = 0;
-    var child = n.first_child;
-    while (child != parser_mod.NO_NODE) {
-        const cn = &pool[@as(usize, @intCast(child))];
-        if (cn.kind == .block) {
-            var ch2 = cn.first_child;
-            while (ch2 != parser_mod.NO_NODE) {
-                const st = &pool[@as(usize, @intCast(ch2))];
-                if (st.kind == .var_decl) {
-                    var arr_sz: i32 = 1;
-                    if (st.val_len > 0) {
-                        arr_sz = @as(i32, @intCast(strToInt(st.val_start[0..st.val_len])));
-                    }
-                    var_count += @as(usize, @intCast(@max(1, arr_sz)));
+fn countVarDecls(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode) usize {
+    if (n.first_child == parser_mod.NO_NODE) return 0;
+    var count: usize = 0;
+    var ch = n.first_child;
+    while (ch != parser_mod.NO_NODE) {
+        const cn = &pool[@as(usize, @intCast(ch))];
+        switch (cn.kind) {
+            .var_decl => {
+                var arr_sz: i32 = 1;
+                if (cn.val_len > 0) arr_sz = @as(i32, @intCast(strToInt(cn.val_start[0..cn.val_len])));
+                count += @as(usize, @intCast(@max(1, arr_sz)));
+            },
+            .block => count += countVarDecls(cn, pool),
+            .if_stmt => {
+                if (cn.first_child != parser_mod.NO_NODE) {
+                    const then_blk = pool[@as(usize, @intCast(cn.first_child))].next_sibling;
+                    if (then_blk != parser_mod.NO_NODE) count += countVarDecls(&pool[@as(usize, @intCast(then_blk))], pool);
+                    const else_blk = if (then_blk != parser_mod.NO_NODE) pool[@as(usize, @intCast(then_blk))].next_sibling else parser_mod.NO_NODE;
+                    if (else_blk != parser_mod.NO_NODE) count += countVarDecls(&pool[@as(usize, @intCast(else_blk))], pool);
                 }
-                ch2 = pool[@as(usize, @intCast(ch2))].next_sibling;
-            }
+            },
+            .while_stmt => {
+                if (cn.first_child != parser_mod.NO_NODE) {
+                    const body = pool[@as(usize, @intCast(cn.first_child))].next_sibling;
+                    if (body != parser_mod.NO_NODE) count += countVarDecls(&pool[@as(usize, @intCast(body))], pool);
+                }
+            },
+            else => {},
         }
-        child = cn.next_sibling;
+        ch = cn.next_sibling;
     }
+    return count;
+}
 
+fn compileFn(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, stack_off: *i32) void {
+    const var_count: usize = countVarDecls(n, pool);
     cb.pushR(cg.RBP);
     cb.movRR(cg.RBP, cg.RSP);
     const frame: i32 = @as(i32, @intCast(var_count)) * 8;
     if (frame > 0) cb.subRImm32(cg.RSP, frame);
 
-    child = n.first_child;
+    var child = n.first_child;
     while (child != parser_mod.NO_NODE) {
         compileStmt(child, pool, cb, vars, vc, stack_off);
         child = pool[@as(usize, @intCast(child))].next_sibling;
@@ -138,12 +163,16 @@ fn compileStmt(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.
             }
             const total_slots: i32 = @max(1, arr_sz);
             var si: i32 = 0;
+            var first_off: i32 = 0;
             while (si < total_slots) : (si += 1) {
                 stack_off.* -= 8;
                 const off = stack_off.*;
-                if (vc.* < MAX_VARS) {
-                    vars[vc.*] = Var{ .name = name, .off = off, .size = 8 };
-                    vc.* += 1;
+                if (si == 0) {
+                    first_off = off;
+                    if (vc.* < MAX_VARS) {
+                        vars[vc.*] = Var{ .name = name, .off = off, .size = 8 };
+                        vc.* += 1;
+                    }
                 }
                 if (si == 0 and init_expr != parser_mod.NO_NODE) {
                     compileExprNode(init_expr, pool, cb, vars, vc);
@@ -198,16 +227,13 @@ fn compileExprNode(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
         },
         .str_lit => {
             const s = n.val_start[0..n.val_len];
-            const skip = @as(u8, @intCast(8 + s.len));
+            cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+            cb.dword(2);
             cb.byte(0xEB);
+            const skip: u8 = @as(u8, @intCast(s.len)) + 1;
             cb.byte(skip);
             for (s) |c| cb.byte(c);
             cb.byte(0);
-            const neg: i32 = -@as(i32, @intCast(8 + s.len));
-            cb.byte(0x48);
-            cb.byte(0x8D);
-            cb.byte(0x05);
-            cb.dword(@as(u32, @bitCast(neg)));
         },
         .ident => {
             if (findVarOffset(vars, vc.*, n.name_start[0..n.name_len])) |off| {
@@ -254,6 +280,8 @@ fn compileExprAddr(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
                 cb.pushR(cg.RAX);
                 compileExprNode(idx_node, pool, cb, vars, vc);
                 cb.movRR(cg.RCX, cg.RAX);
+                cb.negR(cg.RCX);
+                cb.shlRImm8(cg.RCX, 3);
                 cb.popR(cg.RAX);
                 cb.addRR(cg.RAX, cg.RCX);
             }
@@ -278,6 +306,7 @@ fn compileBinaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]pa
     else if (eq(op, "-")) { cb.subRR(cg.RAX, cg.RCX); }
     else if (eq(op, "*")) { cb.imulRR(cg.RAX, cg.RCX); }
     else if (eq(op, "/")) { cb.cqo(); cb.idivR(cg.RCX); }
+    else if (eq(op, "%")) { cb.cqo(); cb.idivR(cg.RCX); cb.movRR(cg.RAX, cg.RDX); }
     else if (eq(op, "&")) { cb.andRR(cg.RAX, cg.RCX); }
     else if (eq(op, "|")) { cb.orRR(cg.RAX, cg.RCX); }
     else if (eq(op, "^")) { cb.xorRR(cg.RAX, cg.RCX); }
@@ -373,6 +402,8 @@ fn compileArrayIndex(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]
     cb.pushR(cg.RAX);
     compileExprNode(idx, pool, cb, vars, vc);
     cb.movRR(cg.RCX, cg.RAX);
+    cb.negR(cg.RCX);
+    cb.shlRImm8(cg.RCX, 3);
     cb.popR(cg.RAX);
     cb.addRR(cg.RAX, cg.RCX);
     cb.movRMem64(cg.RAX, cg.RAX, 0);

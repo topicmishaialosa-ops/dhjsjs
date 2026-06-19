@@ -2,7 +2,7 @@ fn main() int {
     hui x = 1;
     if x {
         return 42;
-    } else {
+    } uebok {
         return 0;
     }
 }
