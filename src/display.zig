@@ -19,10 +19,10 @@ pub const DisplayBackend = struct {
             db.xconn.mapWindow();
             return db;
         }
-        const wl = wl_mod.WlConn.open(0);
-        if (wl) |w| {
-            if (w.createSurface(fb.width, fb.height)) {
-                var db = DisplayBackend{ .mode = 10, .xconn = undefined, .wlconn = w, .fb = fb };
+        var wl = wl_mod.WlConn.open(0);
+        if (wl) |*w_ptr| {
+            if (w_ptr.createSurface(fb.width, fb.height)) {
+                const db = DisplayBackend{ .mode = 10, .xconn = undefined, .wlconn = w_ptr.*, .fb = fb };
                 return db;
             }
         }
