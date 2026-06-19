@@ -1,4 +1,5 @@
 const lexer_mod = @import("lexer.zig");
+const errors_mod = @import("errors.zig");
 
 pub const NodeKind = enum(u8) {
     program,
@@ -53,6 +54,10 @@ pub const AstNode = struct {
     col: usize,
 };
 
+fn tokStrPtr(tok: lexer_mod.Token) struct { ptr: [*]const u8, len: usize } {
+    return .{ .ptr = tok.start, .len = tok.len };
+}
+
 pub const Parser = struct {
     lex: lexer_mod.Lexer,
     tok: lexer_mod.Token,
@@ -61,23 +66,33 @@ pub const Parser = struct {
     err: bool,
     strbuf: [2048]u8,
     strbuf_off: usize,
+    errs: *errors_mod.ErrorList,
+    fn_names: [32][]const u8,
+    fn_count: usize,
 
-    pub fn init(source: [*]const u8, len: usize) Parser {
+    pub fn init(source: [*]const u8, len: usize, errs: *errors_mod.ErrorList) Parser {
         var p = Parser{
-            .lex = lexer_mod.Lexer.init(source, len),
+            .lex = lexer_mod.Lexer.init(source, len, errs),
             .tok = undefined,
             .pool = undefined,
             .node_count = 0,
             .err = false,
             .strbuf = undefined,
             .strbuf_off = 0,
+            .errs = errs,
+            .fn_names = undefined,
+            .fn_count = 0,
         };
         p.tok = p.lex.next();
         return p;
     }
 
     fn allocNode(self: *Parser, kind: NodeKind, name_start: [*]const u8, name_len: usize, val_start: [*]const u8, val_len: usize, line: usize, col: usize) NodeIdx {
-        if (self.node_count >= MAX_NODES) { self.err = true; return 0; }
+        if (self.node_count >= MAX_NODES) {
+            self.errs.add(.parse_unexpected_eof, "too many nodes (limit 2048)", line, col, "reduce code complexity or split into multiple files");
+            self.err = true;
+            return 0;
+        }
         const idx = @as(NodeIdx, @intCast(self.node_count));
         self.pool[@as(usize, @intCast(idx))] = AstNode{
             .kind = kind, .name_start = name_start, .name_len = name_len,
@@ -101,7 +116,13 @@ pub const Parser = struct {
         }
     }
 
-    fn eat(self: *Parser) void { self.tok = self.lex.next(); }
+    fn eat(self: *Parser) void {
+        if (self.tok.kind == .invalid) {
+            self.tok = self.lex.next();
+            return;
+        }
+        self.tok = self.lex.next();
+    }
 
     fn tokStr(self: *Parser) struct { ptr: [*]const u8, len: usize } {
         return .{ .ptr = self.tok.start, .len = self.tok.len };
@@ -115,8 +136,33 @@ pub const Parser = struct {
 
     fn expect(self: *Parser, s: []const u8) bool {
         if (self.tokMatch(s)) { self.eat(); return true; }
+        const msg_buf = self.formatExpectMsg(s);
+        self.errs.add(.parse_unexpected_token, msg_buf[0..], self.tok.line, self.tok.col, "add the expected token here");
         self.err = true;
         return false;
+    }
+
+    fn formatExpectMsg(self: *Parser, expected: []const u8) []const u8 {
+        const buf = self.strbuf[self.strbuf_off..];
+        const prefix = "expected '";
+        var i: usize = 0;
+        while (i < prefix.len and i < buf.len) : (i += 1) buf[i] = prefix[i];
+        var j: usize = 0;
+        while (j < expected.len and i + j < buf.len) : (j += 1) buf[i + j] = expected[j];
+        i += j;
+        if (i < buf.len) { buf[i] = '\''; i += 1; }
+        const tok_s = tokStrPtr(self.tok);
+        const got = " but got '";
+        j = 0;
+        while (j < got.len and i + j < buf.len) : (j += 1) buf[i + j] = got[j];
+        i += j;
+        j = 0;
+        while (j < tok_s.len and i + j < buf.len) : (j += 1) buf[i + j] = tok_s.ptr[j];
+        i += j;
+        if (i < buf.len) { buf[i] = '\''; i += 1; }
+        const result = self.strbuf[self.strbuf_off..i];
+        self.strbuf_off = i;
+        return result;
     }
 
     // --- Top-Level ---
@@ -138,12 +184,27 @@ pub const Parser = struct {
                 self.addChild(prog, self.parseViewmodelDecl());
             } else if (self.tok.kind == .keyword and self.tokMatch("hui")) {
                 self.addChild(prog, self.parseVarDecl());
+            } else if (self.tok.kind != .eof and self.tok.kind != .invalid) {
+                self.errs.add(.parse_unexpected_token, "unexpected token at top level", self.tok.line, self.tok.col, "expected 'fn', 'struct', 'hui', or another top-level declaration");
+                self.eat();
+            } else if (self.tok.kind == .invalid) {
+                self.eat();
             } else {
                 break;
             }
         }
-        if (self.err) return prog;
-        _ = self.expect(";");
+        if (self.tok.kind != .eof and !self.err) {
+            if (!self.tokMatch(";")) {
+                if (self.tok.kind == .eof) {
+                    self.errs.add(.parse_unexpected_eof, "unexpected end of file after program body", self.tok.line, self.tok.col, "add a semicolon ';' to end the program");
+                } else {
+                    self.errs.add(.parse_missing_semicolon, "expected ';' at end of program", self.tok.line, self.tok.col, "add a semicolon ';' here");
+                }
+                self.err = true;
+            } else {
+                self.eat();
+            }
+        }
         return prog;
     }
 
@@ -175,13 +236,55 @@ pub const Parser = struct {
         const line = self.tok.line;
         const col = self.tok.col;
         self.eat();
+        if (self.tok.kind != .identifier and self.tok.kind != .keyword) {
+            self.errs.add(.parse_expected_ident, "expected function name after 'fn'", self.tok.line, self.tok.col, "add a function name here (e.g. 'fn main() {')");
+            self.err = true;
+            return NO_NODE;
+        }
         const name = self.tokStr();
+        // Check duplicate function name
+        var fi: usize = 0;
+        while (fi < self.fn_count) : (fi += 1) {
+            if (eq(name.ptr[0..name.len], self.fn_names[fi])) {
+                const dup_buf = self.strbuf[self.strbuf_off..];
+                const prefix = "duplicate function '";
+                var i: usize = 0;
+                while (i < prefix.len and i < dup_buf.len) : (i += 1) dup_buf[i] = prefix[i];
+                var j: usize = 0;
+                while (j < name.len and i + j < dup_buf.len) : (j += 1) dup_buf[i + j] = name.ptr[j];
+                i += j;
+                if (i < dup_buf.len) { dup_buf[i] = '\''; i += 1; }
+                self.errs.add(.parse_duplicate_fn, dup_buf[0..i], self.tok.line, self.tok.col, "rename or remove the duplicate function");
+                self.err = true;
+            }
+        }
+        if (self.fn_count < 32) {
+            self.fn_names[self.fn_count] = name.ptr[0..name.len];
+            self.fn_count += 1;
+        }
         self.eat();
         const n = self.allocNode(.fn_decl, name.ptr, name.len, "", 0, line, col);
         if (self.tokMatch("(")) {
             self.eat();
-            while (!self.tokMatch(")") and self.tok.kind != .eof) { self.eat(); }
-            if (self.tokMatch(")")) self.eat();
+            while (!self.tokMatch(")") and self.tok.kind != .eof) {
+                if (self.tok.kind == .keyword and (self.tokMatch("hui") or self.tokMatch("int") or self.tokMatch("string") or self.tokMatch("bool") or self.tokMatch("void"))) {
+                    self.eat(); // skip type
+                    if (self.tok.kind == .identifier or self.tok.kind == .keyword) self.eat(); // skip param name
+                    if (self.tokMatch(",")) self.eat();
+                } else {
+                    self.errs.add(.parse_unexpected_token, "invalid parameter in function declaration", self.tok.line, self.tok.col, "parameters should be like 'int name' or 'string name'");
+                    self.eat();
+                }
+            }
+            if (self.tokMatch(")")) {
+                self.eat();
+            } else {
+                self.errs.add(.parse_missing_close_paren, "expected ')' in function declaration", self.tok.line, self.tok.col, "add ')' to close parameter list");
+                self.err = true;
+            }
+        } else {
+            self.errs.add(.parse_unexpected_token, "expected '(' after function name", self.tok.line, self.tok.col, "add '(' and ')' with optional parameters");
+            self.err = true;
         }
         // Skip return type annotation
         while (!self.tokMatch("{") and !self.tokMatch(";") and self.tok.kind != .eof) { self.eat(); }
@@ -191,6 +294,9 @@ pub const Parser = struct {
             self.addChild(n, block);
         } else if (self.tokMatch(";")) {
             self.eat();
+        } else {
+            self.errs.add(.parse_missing_open_brace, "expected '{' for function body", self.tok.line, self.tok.col, "add '{' to start the function body");
+            self.err = true;
         }
         return n;
     }
@@ -237,10 +343,15 @@ pub const Parser = struct {
     fn parseBlock(self: *Parser) NodeIdx {
         const line = self.tok.line; const col = self.tok.col;
         const n = self.allocNode(.block, "", 0, "", 0, line, col);
-        while (!self.tokMatch("}") and self.tok.kind != .eof) {
+        while (!self.tokMatch("}") and self.tok.kind != .eof and !self.err) {
             self.addChild(n, self.parseStatement());
         }
-        if (self.tokMatch("}")) self.eat();
+        if (self.tokMatch("}")) {
+            self.eat();
+        } else if (self.tok.kind == .eof) {
+            self.errs.add(.parse_missing_close_brace, "expected '}' to close block, got end of file", self.tok.line, self.tok.col, "add matching '}' for this block");
+            self.err = true;
+        }
         return n;
     }
 
@@ -279,19 +390,40 @@ pub const Parser = struct {
             return n;
         }
         // Parse expression statement (assign, call, etc.)
+        if (self.tok.kind == .eof or self.tok.kind == .invalid) {
+            self.errs.add(.parse_unexpected_eof, "expected statement, got end of file", self.tok.line, self.tok.col, "add a statement or remove extra content");
+            self.err = true;
+            return NO_NODE;
+        }
+        if (self.tokMatch("}")) {
+            self.errs.add(.parse_unexpected_token, "unexpected '}' - no matching block to close", self.tok.line, self.tok.col, "remove this extra '}'");
+            self.eat();
+            self.err = true;
+            return NO_NODE;
+        }
         return self.parseExprStmt();
     }
 
     fn parseVarDecl(self: *Parser) NodeIdx {
         const line = self.tok.line; const col = self.tok.col;
         self.eat();
+        if (self.tok.kind != .identifier and self.tok.kind != .keyword) {
+            self.errs.add(.parse_expected_ident, "expected variable name after 'hui'", self.tok.line, self.tok.col, "add a name for the variable (e.g. 'hui x = 42')");
+            self.err = true;
+            return NO_NODE;
+        }
         const name = self.tokStr();
         self.eat();
         var arr_size: NodeIdx = NO_NODE;
         if (self.tokMatch("[")) {
             self.eat();
             arr_size = self.parseExpr(0);
-            if (self.tokMatch("]")) self.eat();
+            if (!self.tokMatch("]")) {
+                self.errs.add(.parse_unexpected_token, "expected ']' after array size", self.tok.line, self.tok.col, "add ']' to close array declaration");
+                self.err = true;
+            } else {
+                self.eat();
+            }
         }
     const sz_str = if (arr_size != NO_NODE) self.pool[@as(usize, @intCast(arr_size))].val_start else "";
     const sz_len = if (arr_size != NO_NODE) self.pool[@as(usize, @intCast(arr_size))].val_len else @as(usize, 0);
@@ -301,7 +433,12 @@ pub const Parser = struct {
         const expr = self.parseExpr(0);
         if (expr != NO_NODE) self.addChild(n, expr);
     }
-    if (self.tokMatch(";")) self.eat();
+    if (self.tokMatch(";")) {
+        self.eat();
+    } else if (self.tok.kind != .eof) {
+        self.errs.add(.parse_missing_semicolon, "expected ';' after variable declaration", self.tok.line, self.tok.col, "add ';' at the end of the declaration");
+        self.err = true;
+    }
     return n;
     }
 
@@ -332,17 +469,36 @@ pub const Parser = struct {
     fn parseIfStmt(self: *Parser) NodeIdx {
         const line = self.tok.line; const col = self.tok.col;
         self.eat();
+        var had_paren = false;
         const n = self.allocNode(.if_stmt, "", 0, "", 0, line, col);
-        if (self.tokMatch("(")) { self.eat(); }
+        if (self.tokMatch("(")) { self.eat(); had_paren = true; }
         const cond = self.parseExpr(0);
-        if (cond != NO_NODE) self.addChild(n, cond);
-        if (self.tokMatch(")")) { self.eat(); }
+        if (cond == NO_NODE) {
+            self.errs.add(.parse_expected_expr, "expected condition in 'if' statement", self.tok.line, self.tok.col, "add a comparison or boolean expression (e.g. 'x > 0')");
+            self.err = true;
+        } else {
+            self.addChild(n, cond);
+        }
+        if (had_paren) {
+            if (self.tokMatch(")")) { self.eat(); }
+            else {
+                self.errs.add(.parse_missing_close_paren, "expected ')' to close condition", self.tok.line, self.tok.col, "add ')' to close the condition");
+                self.err = true;
+            }
+        }
         if (self.tokMatch("{")) {
             self.eat(); const block = self.parseBlock(); self.addChild(n, block);
+        } else if (!self.err) {
+            self.errs.add(.parse_missing_open_brace, "expected '{' for if body", self.tok.line, self.tok.col, "add '{' and '}' around the if body");
+            self.err = true;
         }
         if (self.tokMatch("uebok")) {
             self.eat();
             if (self.tokMatch("{")) { self.eat(); const block = self.parseBlock(); self.addChild(n, block); }
+            else {
+                self.errs.add(.parse_missing_open_brace, "expected '{' for else body", self.tok.line, self.tok.col, "add '{' and '}' around the else body");
+                self.err = true;
+            }
         }
         return n;
     }
@@ -350,12 +506,28 @@ pub const Parser = struct {
     fn parseWhileStmt(self: *Parser) NodeIdx {
         const line = self.tok.line; const col = self.tok.col;
         self.eat();
+        var had_paren = false;
         const n = self.allocNode(.while_stmt, "while", 5, "", 0, line, col);
-        if (self.tokMatch("(")) { self.eat(); }
+        if (self.tokMatch("(")) { self.eat(); had_paren = true; }
         const cond = self.parseExpr(0);
-        if (cond != NO_NODE) self.addChild(n, cond);
-        if (self.tokMatch(")")) { self.eat(); }
+        if (cond == NO_NODE) {
+            self.errs.add(.parse_expected_expr, "expected condition in 'while' statement", self.tok.line, self.tok.col, "add a comparison or boolean expression (e.g. 'x < 10')");
+            self.err = true;
+        } else {
+            self.addChild(n, cond);
+        }
+        if (had_paren) {
+            if (self.tokMatch(")")) { self.eat(); }
+            else {
+                self.errs.add(.parse_missing_close_paren, "expected ')' to close condition", self.tok.line, self.tok.col, "add ')' to close the condition");
+                self.err = true;
+            }
+        }
         if (self.tokMatch("{")) { self.eat(); const block = self.parseBlock(); self.addChild(n, block); }
+        else if (!self.err) {
+            self.errs.add(.parse_missing_open_brace, "expected '{' for while body", self.tok.line, self.tok.col, "add '{' and '}' around the while body");
+            self.err = true;
+        }
         return n;
     }
 
@@ -534,7 +706,12 @@ pub const Parser = struct {
         if (self.tokMatch("(")) {
             self.eat();
             const expr = self.parseExpr(0);
-            if (self.tokMatch(")")) self.eat();
+            if (!self.tokMatch(")")) {
+                self.errs.add(.parse_missing_close_paren, "expected ')' to close expression", self.tok.line, self.tok.col, "add ')' here");
+                self.err = true;
+            } else {
+                self.eat();
+            }
             return expr;
         }
 
@@ -565,9 +742,19 @@ pub const Parser = struct {
                 while (!self.tokMatch(")") and self.tok.kind != .eof) {
                     const arg = self.parseExpr(0);
                     if (arg != NO_NODE) self.addChild(n, arg);
-                    if (self.tokMatch(",")) self.eat();
+                    if (self.tokMatch(",")) { self.eat(); }
+                    else if (!self.tokMatch(")") and self.tok.kind != .eof) {
+                        self.errs.add(.parse_unexpected_token, "expected ')' or ',' in function arguments", self.tok.line, self.tok.col, "add ')' to close the call or ',' to add more arguments");
+                        self.err = true;
+                        break;
+                    }
                 }
-                if (self.tokMatch(")")) self.eat();
+                if (self.tokMatch(")")) {
+                    self.eat();
+                } else {
+                    self.errs.add(.parse_missing_close_paren, "expected ')' after function arguments", self.tok.line, self.tok.col, "add ')' to close function call");
+                    self.err = true;
+                }
                 return n;
             }
 
@@ -583,6 +770,19 @@ pub const Parser = struct {
             return self.allocNode(.ident, name.ptr, name.len, "", 0, line, col);
         }
 
+        if (self.tokMatch("}")) {
+            self.errs.add(.parse_unexpected_token, "unexpected '}' - no matching opening brace", self.tok.line, self.tok.col, "remove this extra '}' or check braces");
+            self.err = true;
+            return NO_NODE;
+        }
+        if (self.tok.kind == .eof) {
+            self.errs.add(.parse_unexpected_eof, "unexpected end of file while parsing expression", self.tok.line, self.tok.col, "add the missing expression or remove incomplete code");
+            self.err = true;
+            return NO_NODE;
+        }
+
+        self.errs.add(.parse_expected_expr, "expected an expression", self.tok.line, self.tok.col, "add a value, variable, or parenthesized expression here");
+        self.err = true;
         return NO_NODE;
     }
 };

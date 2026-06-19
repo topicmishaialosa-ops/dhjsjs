@@ -8,6 +8,7 @@ const codegen_rv = @import("codegen_rv.zig");
 const crypto = @import("crypto.zig");
 const sys = @import("sys.zig");
 const utils = @import("utils.zig");
+const errors_mod = @import("errors.zig");
 const esp = @import("esp.zig");
 const axml = @import("axml.zig");
 const zip = @import("zip.zig");
@@ -79,13 +80,19 @@ fn parseTarget(s: []const u8) ?Target {
 }
 
 fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
-    var parser = parser_mod.Parser.init(src.ptr, src.len);
+    var errs = errors_mod.ErrorList.init(src.ptr, src.len);
+    var parser = parser_mod.Parser.init(src.ptr, src.len, &errs);
     const prog = parser.parse();
+    if (errs.hasErrors()) {
+        errs.printAll();
+        return false;
+    }
     const SYS_CHMOD: usize = 90;
     const effective = if (target == .native) hostTarget() else target;
     switch (effective) {
         .x86_64 => {
-            var cb = compiler_mod.compile(prog, &parser.pool);
+            var cb = compiler_mod.compile(prog, &parser.pool, &errs);
+            if (errs.hasErrors()) { errs.printAll(); return false; }
             cb.buildElf64();
             if (!writeFile(out_path, cb.get())) return false;
         },
@@ -105,7 +112,8 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
             return writeFile(out_path, cb.get());
         },
         .windows => {
-            var cb = compiler_mod.compile(prog, &parser.pool);
+            var cb = compiler_mod.compile(prog, &parser.pool, &errs);
+            if (errs.hasErrors()) { errs.printAll(); return false; }
             cb.buildPe64();
             if (!writeFile(out_path, cb.get())) return false;
         },
@@ -281,8 +289,10 @@ fn cmdBuild(args: []const []const u8) void {
     if (target == .apk) {
         manifest.permissions = perm_list[0..perm_count];
 
-        var parser = parser_mod.Parser.init(src.ptr, src.len);
+        var errs = errors_mod.ErrorList.init(src.ptr, src.len);
+        var parser = parser_mod.Parser.init(src.ptr, src.len, &errs);
         const prog = parser.parse();
+        if (errs.hasErrors()) { errs.printAll(); sys.exit(1); }
 
         var cb = compiler_arm.compileEx(prog, &parser.pool, true);
         cb.buildElf64Dyn();
@@ -356,9 +366,12 @@ fn cmdRun(args: []const []const u8) void {
     const src = readFile(src_file, buf[0..]) orelse {
         sys.writeStr(2, "error: cannot read '", 20); sys.writeStr(2, src_file.ptr, src_file.len); sys.writeStr(2, "'\n", 2); sys.exit(1);
     };
-    var parser = parser_mod.Parser.init(src.ptr, src.len);
+    var errs = errors_mod.ErrorList.init(src.ptr, src.len);
+    var parser = parser_mod.Parser.init(src.ptr, src.len, &errs);
     const prog = parser.parse();
-    var cb = compiler_mod.compile(prog, &parser.pool);
+    if (errs.hasErrors()) { errs.printAll(); sys.exit(1); }
+    var cb = compiler_mod.compile(prog, &parser.pool, &errs);
+    if (errs.hasErrors()) { errs.printAll(); sys.exit(1); }
     cb.buildElf64();
     var tmppath: [32]u8 = @splat(0);
     const tpl = "/tmp/dhjsjs_run_XXXXXX";
@@ -454,8 +467,10 @@ fn cmdTranspile(args: []const []const u8) void {
     }
     var buf: [BUFSIZE]u8 = undefined;
     const src = readFile(src_file, buf[0..]) orelse { sys.writeStr(2, "error: cannot read file\n", 24); sys.exit(1); };
-    var parser = parser_mod.Parser.init(src.ptr, src.len);
+    var errs = errors_mod.ErrorList.init(src.ptr, src.len);
+    var parser = parser_mod.Parser.init(src.ptr, src.len, &errs);
     _ = parser.parse();
+    if (errs.hasErrors()) { errs.printAll(); sys.exit(1); }
     var cbuf: [BUFSIZE]u8 = undefined;
     var cpos: usize = 0;
     cpos += genStr("#include <stdlib.h>\n#include <stdio.h>\n#include <stdint.h>\n\n", &cbuf, cpos);

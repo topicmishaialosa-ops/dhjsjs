@@ -3,6 +3,7 @@ const gfx = @import("render.zig");
 const ide_mod = @import("ide.zig");
 const parser_mod = @import("parser.zig");
 const compiler_mod = @import("compiler.zig");
+const errors_mod = @import("errors.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const x11_mod = @import("x11.zig");
@@ -53,10 +54,22 @@ fn buildProject(ide: *ide_mod.IdeState) void {
     _ = sys.mkdir("output\x00", 0x1C0);
 
     const src = ide.content[0..ide.clen];
-    var parser = parser_mod.Parser.init(src.ptr, src.len);
+    var errs = errors_mod.ErrorList.init(src.ptr, src.len);
+    var parser = parser_mod.Parser.init(src.ptr, src.len, &errs);
     const prog = parser.parse();
 
-    var cb = compiler_mod.compile(prog, &parser.pool);
+    if (errs.hasErrors()) {
+        errs.printAll();
+        ide.setStatus("build failed - check errors");
+        return;
+    }
+
+    var cb = compiler_mod.compile(prog, &parser.pool, &errs);
+    if (errs.hasErrors()) {
+        errs.printAll();
+        ide.setStatus("build failed - check errors");
+        return;
+    }
     cb.buildElf64();
     writeFile("output/out.bin\x00", cb.get());
 
