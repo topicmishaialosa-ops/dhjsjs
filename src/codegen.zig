@@ -132,12 +132,12 @@ pub const CodeBuffer = struct {
 
     pub fn addRImm32(self: *CodeBuffer, r: u8, val: i32) void {
         if (val >= -128 and val <= 127) {
-            self.rex_if(r, 0);
+            self.rex_wb(0, if (r >= 8) 1 else 0);
             self.byte(0x83);
             self.modrm(3, 0, r);
             self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
         } else {
-            self.rex_if(r, 0);
+            self.rex_wb(0, if (r >= 8) 1 else 0);
             self.byte(0x81);
             self.modrm(3, 0, r);
             self.dword(@as(u32, @bitCast(val)));
@@ -334,8 +334,23 @@ pub fn pushfq(self: *CodeBuffer) void {
         self.byte(0xC3);
     }
 
+    pub fn movImm16RSP(self: *CodeBuffer, off: u8, val: u16) void {
+        self.byte(0x66);
+        self.byte(0xC7);
+        if (off == 0) { self.byte(0x04); self.byte(0x24); }
+        else { self.byte(0x44); self.byte(0x24); self.byte(off); }
+        self.word(val);
+    }
+
+    pub fn movImm32RSP(self: *CodeBuffer, off: u8, val: u32) void {
+        self.byte(0xC7);
+        if (off == 0) { self.byte(0x04); self.byte(0x24); }
+        else { self.byte(0x44); self.byte(0x24); self.byte(off); }
+        self.dword(val);
+    }
+
     pub fn leaRMem(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
-        self.rex_wb(if (r >= 8) 1 else 0, if (base >= 8) 1 else 0);
+        self.rex_w(0, if (base >= 8) 1 else 0, if (r >= 8) 1 else 0);
         if (off == 0) {
             self.byte(0x8D);
             self.modrm(0, r, base);

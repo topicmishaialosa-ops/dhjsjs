@@ -35,9 +35,10 @@ pub const NodeIdx = i32;
 pub const NO_NODE: NodeIdx = -1;
 pub const MAX_NODES = 2048;
 
-const std = @import("std");
 fn eq(a: []const u8, b: []const u8) bool {
-    return a.len == b.len and (a.len == 0 or std.mem.eql(u8, a, b));
+    if (a.len != b.len) return false;
+    for (a, 0..) |c, i| if (c != b[i]) return false;
+    return true;
 }
 
 pub const AstNode = struct {
@@ -58,8 +59,8 @@ pub const Parser = struct {
     pool: [MAX_NODES]AstNode,
     node_count: usize,
     err: bool,
-    strbuf: [256]u8,
-    strbuf_len: usize,
+    strbuf: [2048]u8,
+    strbuf_off: usize,
 
     pub fn init(source: [*]const u8, len: usize) Parser {
         var p = Parser{
@@ -69,7 +70,7 @@ pub const Parser = struct {
             .node_count = 0,
             .err = false,
             .strbuf = undefined,
-            .strbuf_len = 0,
+            .strbuf_off = 0,
         };
         p.tok = p.lex.next();
         return p;
@@ -430,11 +431,12 @@ pub const Parser = struct {
                 const nr = &self.pool[@as(usize, @intCast(right))];
                 if (nl.kind == .str_lit and nr.kind == .str_lit) {
                     const total = nl.val_len + nr.val_len;
-                    if (total < self.strbuf.len) {
-                        @memcpy(self.strbuf[0..nl.val_len], nl.val_start[0..nl.val_len]);
-                        @memcpy(self.strbuf[nl.val_len..nl.val_len + nr.val_len], nr.val_start[0..nr.val_len]);
-                        self.strbuf_len = total;
-                        left = self.allocNode(.str_lit, "", 0, &self.strbuf, total, self.tok.line, self.tok.col);
+                    const concat_start = self.strbuf_off;
+                    if (concat_start + total < self.strbuf.len) {
+                        @memcpy(self.strbuf[concat_start..][0..nl.val_len], nl.val_start[0..nl.val_len]);
+                        @memcpy(self.strbuf[concat_start + nl.val_len ..][0..nr.val_len], nr.val_start[0..nr.val_len]);
+                        self.strbuf_off += total;
+                        left = self.allocNode(.str_lit, "", 0, self.strbuf[concat_start..].ptr, total, self.tok.line, self.tok.col);
                     } else {
                         const n = self.allocNode(.binary_op, op.ptr, op.len, "", 0, self.tok.line, self.tok.col);
                         if (left != NO_NODE) self.addChild(n, left);
@@ -455,6 +457,29 @@ pub const Parser = struct {
             }
         }
         return left;
+    }
+
+    fn unescape(self: *Parser, src: [*]const u8, len: usize) []const u8 {
+        const start = self.strbuf_off;
+        var i: usize = 0;
+        while (i < len and self.strbuf_off < self.strbuf.len) {
+            if (src[i] == '\\' and i + 1 < len) {
+                i += 1;
+                const c = src[i];
+                if (c == 'n') { self.strbuf[self.strbuf_off] = 0x0A; }
+                else if (c == 'r') { self.strbuf[self.strbuf_off] = 0x0D; }
+                else if (c == 't') { self.strbuf[self.strbuf_off] = 0x09; }
+                else if (c == '\\') { self.strbuf[self.strbuf_off] = 0x5C; }
+                else if (c == '"') { self.strbuf[self.strbuf_off] = 0x22; }
+                else { self.strbuf[self.strbuf_off] = '\\'; i -= 1; }
+                self.strbuf_off += 1;
+            } else {
+                self.strbuf[self.strbuf_off] = src[i];
+                self.strbuf_off += 1;
+            }
+            i += 1;
+        }
+        return self.strbuf[start..self.strbuf_off];
     }
 
     fn parsePrimary(self: *Parser) NodeIdx {
@@ -520,11 +545,12 @@ pub const Parser = struct {
             return self.allocNode(.int_lit, "", 0, v.ptr, v.len, line, col);
         }
 
-        // String literal
+        // String literal (with escape sequence processing)
         if (self.tok.kind == .string) {
             const v = self.tokStr();
             self.eat();
-            return self.allocNode(.str_lit, "", 0, v.ptr, v.len, line, col);
+            const unesc = self.unescape(v.ptr, v.len);
+            return self.allocNode(.str_lit, "", 0, unesc.ptr, unesc.len, line, col);
         }
 
         // Identifier

@@ -220,6 +220,11 @@ pub const CodeBuffer = struct {
         self.dword(0xB9400000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
     }
 
+    pub fn str16(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {
+        const imm12: u32 = (@as(u32, @intCast(off)) >> 1) & 0xFFF;
+        self.dword(0x79000000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
+    }
+
     pub fn branch(self: *CodeBuffer) void {
         self.dword(0x14000000);
     }
@@ -236,12 +241,39 @@ pub const CodeBuffer = struct {
         self.dword(0xB5000000 | (@as(u32, rt)));
     }
 
+    pub fn adr(self: *CodeBuffer, rd: u8) void {
+        self.dword(0x10000000 | (@as(u32, rd)));
+    }
+
+    pub fn bCond(self: *CodeBuffer, cond: u8) void {
+        self.dword(0x54000000 | (@as(u32, cond)));
+    }
+
+    pub fn beq(self: *CodeBuffer) void { self.bCond(0); }
+    pub fn bne(self: *CodeBuffer) void { self.bCond(1); }
+    pub fn blt(self: *CodeBuffer) void { self.bCond(10); }
+    pub fn bge(self: *CodeBuffer) void { self.bCond(11); }
+    pub fn bgt(self: *CodeBuffer) void { self.bCond(12); }
+    pub fn ble(self: *CodeBuffer) void { self.bCond(13); }
+
     pub fn bEq(self: *CodeBuffer) void { self.dword(0x54000000 | (0 << 0)); }
     pub fn bNe(self: *CodeBuffer) void { self.dword(0x54000000 | (1 << 0)); }
     pub fn bLt(self: *CodeBuffer) void { self.dword(0x54000000 | (10 << 0)); }
     pub fn bGe(self: *CodeBuffer) void { self.dword(0x54000000 | (11 << 0)); }
     pub fn bGt(self: *CodeBuffer) void { self.dword(0x54000000 | (12 << 0)); }
     pub fn bLe(self: *CodeBuffer) void { self.dword(0x54000000 | (13 << 0)); }
+
+    pub fn patchAdr(self: *CodeBuffer, pos: usize, target: usize) void {
+        const off = (@as(i32, @intCast(target)) - @as(i32, @intCast(pos)));
+        const imm19 = (@as(u32, @bitCast(off >> 2))) & 0x7FFFF;
+        const orig = @as(u32, @bitCast([_]u8{ self.buf[pos], self.buf[pos + 1], self.buf[pos + 2], self.buf[pos + 3] }));
+        const rd = orig & 0x1F;
+        const enc = (orig & 0x9F000000) | (imm19 << 5) | rd;
+        self.buf[pos + 0] = @as(u8, @truncate(enc));
+        self.buf[pos + 1] = @as(u8, @truncate(enc >> 8));
+        self.buf[pos + 2] = @as(u8, @truncate(enc >> 16));
+        self.buf[pos + 3] = @as(u8, @truncate(enc >> 24));
+    }
 
     pub fn patchB(self: *CodeBuffer, pos: usize, target: usize) void {
         const off = (@as(i32, @intCast(target)) - @as(i32, @intCast(pos))) >> 2;

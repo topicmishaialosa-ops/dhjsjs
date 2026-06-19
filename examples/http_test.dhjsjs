@@ -1,0 +1,17 @@
+fn main() {
+    sock = socket(2, 1, 0);
+    if (sock < 0) { print("err: sock\n"); return; }
+    print("sock ok\n");
+    
+    // try multiple IPs
+    r = connect(sock, 0x710EB16C, 80);  // 108.177.14.113
+    if (r < 0) { r = connect(sock, 0x8A0EB16C, 80); }  // 108.177.14.138
+    if (r < 0) { r = connect(sock, 0x8B0EB16C, 80); }  // 108.177.14.139
+    if (r < 0) { r = connect(sock, 0x660EB16C, 80); }  // 108.177.14.102
+    if (r < 0) { r = connect(sock, 0x640EB16C, 80); }  // 108.177.14.100
+    if (r < 0) { print("err: conn all\n"); return; }
+    print("conn ok\n");
+    
+    print("done\n");
+    close(sock);
+}

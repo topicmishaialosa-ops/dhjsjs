@@ -5,6 +5,7 @@ const compiler_arm = @import("compiler_arm.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const codegen_rv = @import("codegen_rv.zig");
+const crypto = @import("crypto.zig");
 const sys = @import("sys.zig");
 const utils = @import("utils.zig");
 const esp = @import("esp.zig");
@@ -14,12 +15,13 @@ const zip = @import("zip.zig");
 const Target = enum { x86_64, aarch64, riscv32, apk, raw, native, windows };
 
 fn hostTarget() Target {
-    return switch (@import("builtin").target.cpu.arch) {
-        .x86_64 => .x86_64,
-        .aarch64 => .aarch64,
-        .riscv32 => .riscv32,
-        else => .x86_64,
-    };
+    var buf: [390]u8 = @splat(0);
+    const SYS_UNAME: usize = 63;
+    _ = sys.syscall1(SYS_UNAME, @intFromPtr(&buf));
+    const machine = buf[260..];
+    if (machine[0] == 'a' and machine[1] == 'a' and machine[2] == 'r' and machine[3] == 'c' and machine[4] == 'h' and machine[5] == '6' and machine[6] == '4') return .aarch64;
+    if (machine[0] == 'x' and machine[1] == '8' and machine[2] == '6' and machine[3] == '_' and machine[4] == '6' and machine[5] == '4') return .x86_64;
+    return .x86_64;
 }
 
 const BUFSIZE = 65536;
@@ -118,6 +120,7 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
 }
 
 fn signApk(apk_path: []const u8, _: bool) bool {
+    // Generate RSA key on first use, persist as raw binary
     var key_path_buf: [512]u8 = undefined;
     var kp: usize = 0;
     var home_val: [256]u8 = undefined;
@@ -129,47 +132,80 @@ fn signApk(apk_path: []const u8, _: bool) bool {
         @memcpy(key_path_buf[0..4], "/tmp");
         kp = 4;
     }
-    const ks_suffix = "/.dhjsjs-keystore.jks\x00";
+    const ks_suffix = "/.dhjsjs-key.raw\x00";
     @memcpy(key_path_buf[kp..kp + ks_suffix.len], ks_suffix);
     kp += ks_suffix.len - 1;
-    const key_path = key_path_buf[0..kp :0];
 
+    var key: crypto.RsaPrivateKey = undefined;
     const ksfd = sys.open(&key_path_buf, 0, 0);
-    if (ksfd < 0) {
-        var cmd_buf: [1024]u8 = undefined;
-        var ci: usize = 0;
-        const prefix = "keytool -genkey -v -keystore ";
-        @memcpy(cmd_buf[0..prefix.len], prefix);
-        ci += prefix.len;
-        @memcpy(cmd_buf[ci..ci + key_path.len], key_path);
-        ci += key_path.len;
-        const opts = " -alias dhjsjs -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname \"CN=dhjsjs, OU=dhjsjs, O=dhjsjs, L=Unknown, ST=Unknown, C=US\" -noprompt\x00";
-        @memcpy(cmd_buf[ci..ci + opts.len], opts);
-        ci += opts.len;
-        const pid = sys.syscall3(57, 0, 0, 0);
-        if (pid == 0) { _ = sys.syscall3(59, @intFromPtr(&cmd_buf), 0, 0); sys.exit(1); }
-        _ = sys.syscall1(61, pid);
-    } else {
+    if (ksfd >= 0) {
+        // Load existing key
+        var key_buf: [2048]u8 = undefined;
+        const nread = sys.read(ksfd, &key_buf, key_buf.len);
         sys.close(ksfd);
+        if (nread >= 256) {
+            key.n = crypto.biFromBytes(key_buf[0..256]);
+            key.e = crypto.biFromBytes(key_buf[256..258]);
+            key.d = crypto.biFromBytes(key_buf[258..514]);
+            key.p = crypto.biFromBytes(key_buf[514..642]);
+            key.q = crypto.biFromBytes(key_buf[642..770]);
+            key.dp = crypto.biFromBytes(key_buf[770..898]);
+            key.dq = crypto.biFromBytes(key_buf[898..1026]);
+            key.qinv = crypto.biFromBytes(key_buf[1026..1154]);
+        } else {
+            crypto.rsaGenerateKey(&key);
+        }
+    } else {
+        crypto.rsaGenerateKey(&key);
+        // Save key
+        var key_buf: [2048]u8 = undefined;
+        crypto.biToBytes(&key.n, key_buf[0..256]);
+        crypto.biToBytes(&key.e, key_buf[256..258]);
+        crypto.biToBytes(&key.d, key_buf[258..514]);
+        crypto.biToBytes(&key.p, key_buf[514..642]);
+        crypto.biToBytes(&key.q, key_buf[642..770]);
+        crypto.biToBytes(&key.dp, key_buf[770..898]);
+        crypto.biToBytes(&key.dq, key_buf[898..1026]);
+        crypto.biToBytes(&key.qinv, key_buf[1026..1154]);
+        const kfd = sys.open(&key_path_buf, sys.O_RDWR | 0x40 | 0x200, 0x1A4);
+        if (kfd >= 0) { _ = sys.write(kfd, &key_buf, 1154); sys.close(kfd); }
     }
 
-    var apk_cmd: [2048]u8 = undefined;
-    var ai: usize = 0;
-    const apk_prefix = "apksigner sign --ks ";
-    @memcpy(apk_cmd[0..apk_prefix.len], apk_prefix);
-    ai += apk_prefix.len;
-    @memcpy(apk_cmd[ai..ai + key_path.len], key_path);
-    ai += key_path.len;
-    const apk_mid = " --ks-pass pass:android --key-pass pass:android ";
-    @memcpy(apk_cmd[ai..ai + apk_mid.len], apk_mid);
-    ai += apk_mid.len;
-    @memcpy(apk_cmd[ai..ai + apk_path.len], apk_path);
-    ai += apk_path.len;
-    apk_cmd[ai] = 0;
+    // Read APK into memory
+    var apk_buf: [262144]u8 = undefined;
+    var apk_data: []const u8 = undefined;
+    {
+        // Open the apk file
+        var p: [256]u8 = undefined;
+        var pi: usize = 0;
+        while (pi < apk_path.len and pi < 255) : (pi += 1) p[pi] = apk_path[pi];
+        p[pi] = 0;
+        const apk_fd = sys.open(&p, 0, 0);
+        if (apk_fd < 0) return false;
+        var total: usize = 0;
+        while (total < apk_buf.len) {
+            const n = sys.read(apk_fd, apk_buf[total..].ptr, apk_buf.len - total);
+            if (n <= 0) break;
+            total += @as(usize, @intCast(n));
+        }
+        sys.close(apk_fd);
+        apk_data = apk_buf[0..total];
+    }
 
-    const pid2 = sys.syscall3(57, 0, 0, 0);
-    if (pid2 == 0) { _ = sys.syscall3(59, @intFromPtr(&apk_cmd), 0, 0); sys.exit(1); }
-    _ = sys.syscall1(61, pid2);
+    // Sign
+    var out_buf: [262144 + 16384]u8 = undefined;
+    const out_len = crypto.apkSign(apk_data, &out_buf, &key);
+    if (out_len == 0) return false;
+
+    // Write signed APK
+    var p: [256]u8 = undefined;
+    var pi: usize = 0;
+    while (pi < apk_path.len and pi < 255) : (pi += 1) p[pi] = apk_path[pi];
+    p[pi] = 0;
+    const out_fd = sys.open(&p, sys.O_RDWR | 0x40 | 0x200, 0x1A4);
+    if (out_fd < 0) return false;
+    _ = sys.write(out_fd, &out_buf, out_len);
+    sys.close(out_fd);
     return true;
 }
 

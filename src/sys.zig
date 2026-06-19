@@ -1,6 +1,5 @@
-const builtin = @import("builtin");
-pub const is_windows = builtin.target.os.tag == .windows;
-pub const is_linux = builtin.target.os.tag == .linux;
+pub const is_windows = false;
+pub const is_linux = true;
 
 pub const SYS_FTRUNCATE: usize = 77;
 pub const SYS_MEMFD_CREATE: usize = 438;

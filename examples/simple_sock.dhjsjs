@@ -1,0 +1,10 @@
+fn main() {
+    print("testing\n", 9);
+    sock = socket(2, 1, 0);
+    if (sock < 0) { return; }
+    print("socket ok\n", 11);
+    r = connect(sock, 0x8EFAB94E, 80);
+    if (r < 0) { return; }
+    print("connected\n", 11);
+    close(sock);
+}

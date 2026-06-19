@@ -124,6 +124,9 @@ fn countVarDecls(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]pars
                 if (cn.val_len > 0) arr_sz = @as(i32, @intCast(strToInt(cn.val_start[0..cn.val_len])));
                 count += @max(1, arr_sz);
             },
+            .assign => {
+                count += 1;
+            },
             .struct_var_decl => {
                 const field_count = structFieldCount(pool, cn.name_start[0..cn.name_len]);
                 count += @max(1, field_count);
@@ -236,14 +239,23 @@ fn compileStmt(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_mod.
         },
         .call => compileCall(n, pool, cb, vars, vc, frame),
         .assign => {
+            const name = n.name_start[0..n.name_len];
+            const existing = findVarOffset(vars, vc.*, name);
+            const off = if (existing) |o| o else blk: {
+                stack_off.* -= 8;
+                const sp_off = stack_off.* + frame;
+                if (vc.* < MAX_VARS) {
+                    vars[vc.*] = Var{ .name = name, .off = sp_off };
+                    vc.* += 1;
+                }
+                break :blk sp_off;
+            };
             if (n.first_child != parser_mod.NO_NODE) {
                 compileExprNode(n.first_child, pool, cb, vars, vc, frame);
             } else {
                 cb.mov(cg.X0, cg.ZR);
             }
-            const name = n.name_start[0..n.name_len];
-            const off = findVarOffset(vars, vc.*, name);
-            if (off) |o| cb.str64(cg.X0, 31, o);
+            cb.str64(cg.X0, 31, off);
         },
         .store => {
             const lvalue = n.first_child;
@@ -300,10 +312,16 @@ fn compileExprNode(idx: parser_mod.NodeIdx, pool: *[parser_mod.MAX_NODES]parser_
             cb.movRImm64(cg.X0, @as(u64, @bitCast(v)));
         },
         .str_lit => {
-            // Store string in code buffer and return pointer to it
-            // Since code buffer grows forward, we store at end and return its offset
-            // For now, return pointer to embedded data after code
-            cb.movRImm64(cg.X0, @as(u64, @bitCast(@as(i64, 0))));
+            const s = n.val_start[0..n.val_len];
+            const adr_pos = cb.len;
+            cb.adr(cg.X0);
+            const b_pos = cb.len;
+            cb.dword(0x14000000);
+            const str_pos = cb.len;
+            for (s) |c| cb.byte(c);
+            while (cb.len % 4 != 0) cb.byte(0);
+            cb.patchAdr(adr_pos, str_pos);
+            cb.patchB(b_pos, cb.len);
         },
         .ident => {
             if (findVarOffset(vars, vc.*, n.name_start[0..n.name_len])) |off| {
@@ -487,7 +505,7 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         if (ch != parser_mod.NO_NODE) {
             const cn = &pool[@as(usize, @intCast(ch))];
             if (cn.kind == .str_lit) len = @as(i64, @intCast(cn.val_len));
-            if (cn.next_sibling != parser_mod.NO_NODE) {
+            if (len < 0 and cn.next_sibling != parser_mod.NO_NODE) {
                 const len_node = &pool[@as(usize, @intCast(cn.next_sibling))];
                 if (len_node.kind == .int_lit) len = strToInt(len_node.val_start[0..len_node.val_len]);
             }
@@ -568,18 +586,70 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
     }
     if (eq(name, "socket") or eq(name, "connect") or eq(name, "bind") or eq(name, "listen") or eq(name, "accept") or eq(name, "send") or eq(name, "recv")) {
         const arm_nr: i64 = if (eq(name, "socket")) 198 else if (eq(name, "connect")) 203 else if (eq(name, "bind")) 200 else if (eq(name, "listen")) 201 else if (eq(name, "accept")) 242 else if (eq(name, "send")) 211 else 212;
-        var ai2: usize = 0;
-        var args: [6]i64 = .{0} ** 6;
-        var ch2 = n.first_child;
-        while (ch2 != parser_mod.NO_NODE and ai2 < 6) {
-            const cn = &pool[@as(usize, @intCast(ch2))];
-            if (cn.kind == .int_lit) args[ai2] = strToInt(cn.val_start[0..cn.val_len]);
-            ai2 += 1;
-            ch2 = cn.next_sibling;
+        var is_expr: [6]bool = .{false} ** 6;
+        var args_list: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+        var arg_i: usize = 0;
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and arg_i < 6) {
+            args_list[arg_i] = ch;
+            const cn = &pool[@as(usize, @intCast(ch))];
+            is_expr[arg_i] = cn.kind != .int_lit;
+            arg_i += 1; ch = cn.next_sibling;
         }
+        if (arg_i == 3 and !is_expr[1] and (arm_nr == 203 or arm_nr == 200)) {
+            var ip_v: i64 = 0; var port_v: i64 = 0;
+            if (!is_expr[1]) { const cn = &pool[@as(usize, @intCast(args_list[1]))]; ip_v = strToInt(cn.val_start[0..cn.val_len]); }
+            if (!is_expr[2]) { const cn = &pool[@as(usize, @intCast(args_list[2]))]; port_v = strToInt(cn.val_start[0..cn.val_len]); }
+            const pnet = @as(u16, @intCast(port_v));
+            const pnet_be = (@as(u16, @intCast(pnet)) << 8) | (@as(u16, @intCast(pnet)) >> 8);
+            if (is_expr[0]) { compileExprNode(args_list[0], pool, cb, vars, vc, frame); }
+            cb.subi(31, 31, 16);
+            cb.movRImm64(cg.X9, 2);
+            cb.str16(cg.X9, 31, 0);
+            cb.movRImm64(cg.X9, @as(u64, @intCast(pnet_be)));
+            cb.str16(cg.X9, 31, 2);
+            cb.movRImm64(cg.X9, @as(u64, @intCast(@as(u32, @intCast(ip_v)))));
+            cb.str32(cg.X9, 31, 4);
+            cb.str32(cg.ZR, 31, 8);
+            cb.str32(cg.ZR, 31, 12);
+            cb.movRImm64(cg.X8, @as(u64, @bitCast(arm_nr)));
+            if (!is_expr[0]) { var fd: i64 = 0; const cn = &pool[@as(usize, @intCast(args_list[0]))]; if (cn.kind == .int_lit) fd = strToInt(cn.val_start[0..cn.val_len]); cb.movRImm64(cg.X0, @as(u64, @bitCast(fd))); }
+            cb.addi(cg.X1, 31, 0);
+            cb.movRImm64(cg.X2, 16);
+            cb.svc(0);
+            cb.addi(31, 31, 16);
+            return;
+        }
+        if (arm_nr == 212 and arg_i >= 2 and !is_expr[1]) {
+            const cn = &pool[@as(usize, @intCast(args_list[1]))];
+            if (cn.kind == .int_lit and strToInt(cn.val_start[0..cn.val_len]) == 0) {
+                if (is_expr[0]) { compileExprNode(args_list[0], pool, cb, vars, vc, frame); }
+                cb.subi(31, 31, 2048);
+                cb.subi(31, 31, 2048);
+                cb.movRImm64(cg.X8, 212);
+                if (!is_expr[0]) { var fd: i64 = 0; const cn2 = &pool[@as(usize, @intCast(args_list[0]))]; if (cn2.kind == .int_lit) fd = strToInt(cn2.val_start[0..cn2.val_len]); cb.movRImm64(cg.X0, @as(u64, @bitCast(fd))); }
+                cb.addi(cg.X1, 31, 0);
+                cb.movRImm64(cg.X2, 4096);
+                cb.movRImm64(cg.X3, 0);
+                cb.movRImm64(cg.X4, 0);
+                cb.movRImm64(cg.X5, 0);
+                cb.svc(0);
+                cb.addi(31, 31, 2048);
+                cb.addi(31, 31, 2048);
+                return;
+            }
+        }
+        var ei: usize = 0;
+        while (ei < arg_i) : (ei += 1) { if (is_expr[ei]) { compileExprNode(args_list[ei], pool, cb, vars, vc, frame); pushX0(cb); } }
         cb.movRImm64(cg.X8, @as(u64, @bitCast(arm_nr)));
-        var ri: usize = 0;
-        while (ri < ai2) : (ri += 1) cb.movRImm64(@as(u8, @intCast(ri)), @as(u64, @bitCast(args[ri])));
+        var ri: usize = arg_i;
+        while (ri > 0) { ri -= 1;
+            if (is_expr[ri]) { popX0(cb); cb.mov(@as(u8, @intCast(ri)), cg.X0); }
+            else if (args_list[ri] != parser_mod.NO_NODE) {
+                const cn = &pool[@as(usize, @intCast(args_list[ri]))];
+                cb.movRImm64(@as(u8, @intCast(ri)), @as(u64, @bitCast(if (cn.kind == .int_lit) strToInt(cn.val_start[0..cn.val_len]) else 0)));
+            }
+        }
         cb.svc(0);
         return;
     }
