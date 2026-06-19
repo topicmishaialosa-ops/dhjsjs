@@ -382,6 +382,26 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.syscall();
         return;
     }
+    if (eq(name, "print")) {
+        const ch = n.first_child;
+        if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.movRR(cg.RSI, cg.RAX);
+        var plen: i64 = -1;
+        if (ch != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch))];
+            if (cn.kind == .str_lit) plen = @as(i64, @intCast(cn.val_len));
+            if (cn.next_sibling != parser_mod.NO_NODE) {
+                const ln = &pool[@as(usize, @intCast(cn.next_sibling))];
+                if (ln.kind == .int_lit) plen = strToInt(ln.val_start[0..ln.val_len]);
+            }
+        }
+        cb.movRImm64(cg.RAX, 1);
+        cb.movRImm64(cg.RDI, 1);
+        if (plen >= 0) cb.movRImm64(cg.RDX, @as(u64, @intCast(plen)));
+        cb.syscall();
+        return;
+    }
     if (eq(name, "socket") or eq(name, "connect") or eq(name, "bind") or eq(name, "listen") or eq(name, "accept") or eq(name, "close") or eq(name, "send") or eq(name, "recv")) {
         const sys_nr: usize = if (eq(name, "socket")) 41 else if (eq(name, "connect")) 42 else if (eq(name, "bind")) 49 else if (eq(name, "listen")) 50 else if (eq(name, "accept")) 43 else if (eq(name, "close")) 3 else if (eq(name, "send")) 44 else 45;
         var is_expr: [6]bool = .{false} ** 6;

@@ -35,6 +35,11 @@ pub const NodeIdx = i32;
 pub const NO_NODE: NodeIdx = -1;
 pub const MAX_NODES = 2048;
 
+const std = @import("std");
+fn eq(a: []const u8, b: []const u8) bool {
+    return a.len == b.len and (a.len == 0 or std.mem.eql(u8, a, b));
+}
+
 pub const AstNode = struct {
     kind: NodeKind,
     name_start: [*]const u8,
@@ -53,6 +58,8 @@ pub const Parser = struct {
     pool: [MAX_NODES]AstNode,
     node_count: usize,
     err: bool,
+    strbuf: [256]u8,
+    strbuf_len: usize,
 
     pub fn init(source: [*]const u8, len: usize) Parser {
         var p = Parser{
@@ -61,6 +68,8 @@ pub const Parser = struct {
             .pool = undefined,
             .node_count = 0,
             .err = false,
+            .strbuf = undefined,
+            .strbuf_len = 0,
         };
         p.tok = p.lex.next();
         return p;
@@ -416,10 +425,34 @@ pub const Parser = struct {
             const op = self.tokStr();
             self.eat();
             const right = self.parseExpr(prec + 1);
-            const n = self.allocNode(.binary_op, op.ptr, op.len, "", 0, self.tok.line, self.tok.col);
-            if (left != NO_NODE) self.addChild(n, left);
-            if (right != NO_NODE) self.addChild(n, right);
-            left = n;
+            if (eq(op.ptr[0..op.len], "+") and left != NO_NODE and right != NO_NODE) {
+                const nl = &self.pool[@as(usize, @intCast(left))];
+                const nr = &self.pool[@as(usize, @intCast(right))];
+                if (nl.kind == .str_lit and nr.kind == .str_lit) {
+                    const total = nl.val_len + nr.val_len;
+                    if (total < self.strbuf.len) {
+                        @memcpy(self.strbuf[0..nl.val_len], nl.val_start[0..nl.val_len]);
+                        @memcpy(self.strbuf[nl.val_len..nl.val_len + nr.val_len], nr.val_start[0..nr.val_len]);
+                        self.strbuf_len = total;
+                        left = self.allocNode(.str_lit, "", 0, &self.strbuf, total, self.tok.line, self.tok.col);
+                    } else {
+                        const n = self.allocNode(.binary_op, op.ptr, op.len, "", 0, self.tok.line, self.tok.col);
+                        if (left != NO_NODE) self.addChild(n, left);
+                        if (right != NO_NODE) self.addChild(n, right);
+                        left = n;
+                    }
+                } else {
+                    const n = self.allocNode(.binary_op, op.ptr, op.len, "", 0, self.tok.line, self.tok.col);
+                    if (left != NO_NODE) self.addChild(n, left);
+                    if (right != NO_NODE) self.addChild(n, right);
+                    left = n;
+                }
+            } else {
+                const n = self.allocNode(.binary_op, op.ptr, op.len, "", 0, self.tok.line, self.tok.col);
+                if (left != NO_NODE) self.addChild(n, left);
+                if (right != NO_NODE) self.addChild(n, right);
+                left = n;
+            }
         }
         return left;
     }

@@ -483,9 +483,10 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         } else {
             cb.mov(cg.X1, cg.ZR);
         }
-        var len: i64 = 0;
+        var len: i64 = -1;
         if (ch != parser_mod.NO_NODE) {
             const cn = &pool[@as(usize, @intCast(ch))];
+            if (cn.kind == .str_lit) len = @as(i64, @intCast(cn.val_len));
             if (cn.next_sibling != parser_mod.NO_NODE) {
                 const len_node = &pool[@as(usize, @intCast(cn.next_sibling))];
                 if (len_node.kind == .int_lit) len = strToInt(len_node.val_start[0..len_node.val_len]);
@@ -493,7 +494,7 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         }
         cb.movRImm64(cg.X8, 64);
         cb.movRImm64(cg.X0, 1);
-        if (len > 0) cb.movRImm64(cg.X2, @as(u64, @bitCast(len)));
+        if (len >= 0) cb.movRImm64(cg.X2, @as(u64, @bitCast(@as(u64, @intCast(len)))));
         cb.svc(0);
         return;
     }
