@@ -565,6 +565,23 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.svc(0);
         return;
     }
+    if (eq(name, "socket") or eq(name, "connect") or eq(name, "bind") or eq(name, "listen") or eq(name, "accept") or eq(name, "send") or eq(name, "recv")) {
+        const arm_nr: i64 = if (eq(name, "socket")) 198 else if (eq(name, "connect")) 203 else if (eq(name, "bind")) 200 else if (eq(name, "listen")) 201 else if (eq(name, "accept")) 242 else if (eq(name, "send")) 211 else 212;
+        var ai2: usize = 0;
+        var args: [6]i64 = .{0} ** 6;
+        var ch2 = n.first_child;
+        while (ch2 != parser_mod.NO_NODE and ai2 < 6) {
+            const cn = &pool[@as(usize, @intCast(ch2))];
+            if (cn.kind == .int_lit) args[ai2] = strToInt(cn.val_start[0..cn.val_len]);
+            ai2 += 1;
+            ch2 = cn.next_sibling;
+        }
+        cb.movRImm64(cg.X8, @as(u64, @bitCast(arm_nr)));
+        var ri: usize = 0;
+        while (ri < ai2) : (ri += 1) cb.movRImm64(@as(u8, @intCast(ri)), @as(u64, @bitCast(args[ri])));
+        cb.svc(0);
+        return;
+    }
     cb.mov(cg.X0, cg.ZR);
 }
 

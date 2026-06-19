@@ -382,6 +382,38 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.syscall();
         return;
     }
+    if (eq(name, "socket") or eq(name, "connect") or eq(name, "bind") or eq(name, "listen") or eq(name, "accept") or eq(name, "close") or eq(name, "send") or eq(name, "recv")) {
+        const sys_nr: usize = if (eq(name, "socket")) 41 else if (eq(name, "connect")) 42 else if (eq(name, "bind")) 49 else if (eq(name, "listen")) 50 else if (eq(name, "accept")) 43 else if (eq(name, "close")) 3 else if (eq(name, "send")) 44 else 45;
+        var is_expr: [6]bool = .{false} ** 6;
+        var args_list: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+        var arg_i: usize = 0;
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and arg_i < 6) {
+            args_list[arg_i] = ch;
+            const cn = &pool[@as(usize, @intCast(ch))];
+            is_expr[arg_i] = cn.kind != .int_lit;
+            arg_i += 1;
+            ch = cn.next_sibling;
+        }
+        var ei: usize = 0;
+        while (ei < arg_i) : (ei += 1) {
+            if (is_expr[ei]) { compileExprNode(args_list[ei], pool, cb, vars, vc); cb.pushR(cg.RAX); }
+        }
+        const regs = [_]u8{ cg.RDI, cg.RSI, cg.RDX, cg.R10, cg.R8, cg.R9 };
+        var ri: usize = arg_i;
+        while (ri > 0) {
+            ri -= 1;
+            if (is_expr[ri]) { cb.popR(regs[ri]); }
+            else if (args_list[ri] != parser_mod.NO_NODE) {
+                const cn = &pool[@as(usize, @intCast(args_list[ri]))];
+                const v: i64 = if (cn.kind == .int_lit) strToInt(cn.val_start[0..cn.val_len]) else 0;
+                cb.movRImm64(regs[ri], @as(u64, @intCast(v)));
+            }
+        }
+        cb.movRImm64(cg.RAX, @as(u64, @intCast(sys_nr)));
+        cb.syscall();
+        return;
+    }
     cb.movRImm64(cg.RAX, 0);
 }
 
