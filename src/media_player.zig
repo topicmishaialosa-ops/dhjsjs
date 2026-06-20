@@ -12,6 +12,13 @@ const H: u32 = 600;
 const MAX_TRACKS: usize = 64;
 const MAX_PATH_LEN: usize = 256;
 
+const CustomEditorState = struct {
+    active_field: u32 = 0,
+    mode: enum { fields, adjust } = .fields,
+};
+
+var editor_state: CustomEditorState = .{};
+
 const Track = struct {
     path: [MAX_PATH_LEN]u8,
     path_len: usize,
@@ -440,9 +447,43 @@ fn drawLibraryView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui, player: *player_mod.
     }
 }
 
+fn adjustField(s: *gui_mod.Style, idx: u32, comp: u32, delta: i32) void {
+    var c: u32 = 0;
+    switch (idx) {
+        0 => c = s.bg, 1 => c = s.panel_bg, 2 => c = s.accent,
+        3 => c = s.text, 4 => c = s.button_bg, 5 => c = s.border,
+        6 => c = s.button_hover, 7 => c = s.text_dim,
+        else => return,
+    }
+    var r: u32 = (c >> 16) & 0xFF;
+    var g: u32 = (c >> 8) & 0xFF;
+    var b: u32 = c & 0xFF;
+    if (comp == 0) r = @min(255, @max(0, @as(i32, @intCast(r)) + delta));
+    if (comp == 1) g = @min(255, @max(0, @as(i32, @intCast(g)) + delta));
+    if (comp == 2) b = @min(255, @max(0, @as(i32, @intCast(b)) + delta));
+    c = (0xFF << 24) | (r << 16) | (g << 8) | b;
+    switch (idx) {
+        0 => s.bg = c, 1 => s.panel_bg = c, 2 => s.accent = c,
+        3 => s.text = c, 4 => s.button_bg = c, 5 => s.border = c,
+        6 => s.button_hover = c, 7 => s.text_dim = c,
+        else => {},
+    }
+}
+
+fn drawBtn(fb: *gfx.Framebuffer, bx: i32, by: i32, bw: u32, bh: u32, label: []const u8, style: *const gui_mod.Style, mx: i32, my: i32, clicked: bool) bool {
+    const hvr = mx >= bx and mx < bx + @as(i32, @intCast(bw)) and my >= by and my < by + @as(i32, @intCast(bh));
+    if (hvr) fillRect(fb, bx, by, bw, bh, style.button_hover)
+    else fillRect(fb, bx, by, bw, bh, style.button_bg);
+    drawRectBorder(fb, bx, by, bw, bh, style.border);
+    const tw = @as(u32, @intCast(label.len)) * 8;
+    drawText(fb, label, bx + @divTrunc(@as(i32, @intCast(bw)) - @as(i32, @intCast(tw)), 2), by + 3, style.text, 8);
+    return hvr and clicked;
+}
+
 fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
     volume: *f32, show_viz: *bool, loop_mode: *bool, shuffle_mode: *bool,
     mx: i32, my: i32, clicked: bool) void {
+
 
     const panel_x: i32 = 10;
     const panel_y: i32 = 60;
@@ -497,26 +538,34 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
     }
 
     cy += 10;
-    drawText(fb, "Theme:", panel_x + 20, cy, gui.style.text, 8);
+    drawText(fb, "Theme Presets:", panel_x + 20, cy, gui.style.text, 8);
 
     const themes = [_]*const gui_mod.Style{
         &gui_mod.style_dark, &gui_mod.style_light, &gui_mod.style_dracula,
-        &gui_mod.style_nord, &gui_mod.style_monokai, &gui_mod.style_one_dark,
-        &gui_mod.style_catppuccin, &gui_mod.style_tokyo_night, &gui_mod.style_gruvbox_dark,
-        &gui_mod.style_rose_pine, &gui_mod.style_forest, &gui_mod.style_ocean,
-        &gui_mod.style_sunset, &gui_mod.style_candy, &gui_mod.style_retro_terminal,
+        &gui_mod.style_nord, &gui_mod.style_solarized_dark, &gui_mod.style_solarized_light,
+        &gui_mod.style_monokai, &gui_mod.style_one_dark, &gui_mod.style_github_light,
+        &gui_mod.style_gruvbox_dark, &gui_mod.style_gruvbox_light, &gui_mod.style_catppuccin,
+        &gui_mod.style_tokyo_night, &gui_mod.style_ayu_dark, &gui_mod.style_ayu_light,
+        &gui_mod.style_material_dark, &gui_mod.style_material_light, &gui_mod.style_high_contrast,
+        &gui_mod.style_retro_terminal, &gui_mod.style_forest, &gui_mod.style_ocean,
+        &gui_mod.style_sunset, &gui_mod.style_candy, &gui_mod.style_monochrome,
+        &gui_mod.style_rose_pine, &gui_mod.style_everforest, &gui_mod.style_nord_light,
     };
     const theme_names = [_][]const u8{
-        "Dark", "Light", "Dracula", "Nord", "Monokai", "One Dark",
-        "Catppuccin", "Tokyo Night", "Gruvbox", "Rose Pine", "Forest", "Ocean",
-        "Sunset", "Candy", "Retro",
+        "Dark", "Light", "Dracula", "Nord", "Solarized Dk", "Solarized Lt",
+        "Monokai", "One Dark", "GitHub Lt", "Gruvbox Dk", "Gruvbox Lt", "Catppuccin",
+        "Tokyo Night", "Ayu Dark", "Ayu Light",
+        "Material Dk", "Material Lt", "High Contrast",
+        "Retro Term", "Forest", "Ocean",
+        "Sunset", "Candy", "Monochrome",
+        "Rose Pine", "Everforest", "Nord Light",
     };
 
     cy += 16;
     var ti: usize = 0;
     var tx = panel_x + 20;
     while (ti < themes.len) : (ti += 1) {
-        const tw: u32 = 80;
+        const tw: u32 = 82;
         const th: u32 = 18;
         const thovered = mx >= tx and mx < tx + @as(i32, @intCast(tw)) and
             my >= cy and my < cy + @as(i32, @intCast(th));
@@ -545,20 +594,128 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
         }
     }
 
-    cy += 40;
-    drawText(fb, "Supported Formats:", panel_x + 20, cy, gui.style.text, 8);
-    cy += 16;
-    drawText(fb, "WAV  - Uncompressed PCM audio", panel_x + 30, cy, gui.style.text_dim, 8);
-    cy += 14;
-    drawText(fb, "MP3  - MPEG Layer 3 audio", panel_x + 30, cy, gui.style.text_dim, 8);
-    cy += 14;
-    drawText(fb, "OGG  - Vorbis audio", panel_x + 30, cy, gui.style.text_dim, 8);
-    cy += 14;
-    drawText(fb, "FLAC - Free Lossless Audio", panel_x + 30, cy, gui.style.text_dim, 8);
-    cy += 14;
-    drawText(fb, "AIFF - Audio Interchange File", panel_x + 30, cy, gui.style.text_dim, 8);
     cy += 30;
-    drawText(fb, "Style fields: bg, panel_bg, button_bg, accent, text, border, rounding, shadow", panel_x + 20, cy, gui.style.accent, 8);
+    drawText(fb, "Custom Theme:", panel_x + 20, cy, gui.style.text, 8);
+    cy += 18;
+
+    const field_names = [_][]const u8{ "bg", "panel", "accent", "text", "btn_bg", "border", "btn_hov", "text_dim" };
+    const field_tags = [_]u32{ 0, 1, 2, 3, 4, 5, 6, 7 };
+    const fw: u32 = 44;
+    const fh: u32 = 16;
+    var fi: usize = 0;
+    var fx = panel_x + 20;
+    while (fi < field_names.len) : (fi += 1) {
+        const fcolor = switch (field_tags[fi]) {
+            0 => gui.style.bg,
+            1 => gui.style.panel_bg,
+            2 => gui.style.accent,
+            3 => gui.style.text,
+            4 => gui.style.button_bg,
+            5 => gui.style.border,
+            6 => gui.style.button_hover,
+            7 => gui.style.text_dim,
+            else => 0xFF000000,
+        };
+        const fhvr = mx >= fx and mx < fx + @as(i32, @intCast(fw)) and
+            my >= cy and my < cy + @as(i32, @intCast(fh));
+
+        if (fi == editor_state.active_field) {
+            drawRectBorder(fb, fx - 1, cy - 2, fw + 2, fh + 4, gui.style.accent);
+        }
+        if (fhvr) fillRect(fb, fx, cy, fw, fh, gui.style.button_hover);
+        fillRect(fb, fx + 2, cy + 2, fw - 4, fh - 4, fcolor);
+        drawRectBorder(fb, fx, cy, fw, fh, gui.style.border);
+        drawText(fb, field_names[fi], fx + 2, cy + fh - 9, gui.style.text_dim, 6);
+
+        if (fhvr and clicked) {
+            editor_state.active_field = @as(u32, @intCast(fi));
+        }
+
+        fx += @as(i32, @intCast(fw)) + 3;
+        if (fx + @as(i32, @intCast(fw)) > panel_x + @as(i32, @intCast(panel_w))) {
+            fx = panel_x + 20;
+            cy += @as(i32, @intCast(fh)) + 4;
+        }
+    }
+
+    cy += @as(i32, @intCast(fh)) + 14;
+
+    var cc: u32 = 0;
+    switch (field_tags[editor_state.active_field]) {
+        0 => cc = gui.style.bg,
+        1 => cc = gui.style.panel_bg,
+        2 => cc = gui.style.accent,
+        3 => cc = gui.style.text,
+        4 => cc = gui.style.button_bg,
+        5 => cc = gui.style.border,
+        6 => cc = gui.style.button_hover,
+        7 => cc = gui.style.text_dim,
+        else => cc = 0xFF000000,
+    }
+
+    const cr: u32 = (cc >> 16) & 0xFF;
+    const cg: u32 = (cc >> 8) & 0xFF;
+    const cb: u32 = cc & 0xFF;
+
+    const adjv: i32 = 16;
+
+    drawText(fb, "R:", panel_x + 20, cy, gui.style.text, 8);
+    const dec = cy;
+    if (drawBtn(fb, panel_x + 34, dec, 18, 16, "-", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 0, -adjv);
+    }
+    if (drawBtn(fb, panel_x + 54, dec, 18, 16, "+", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 0, adjv);
+    }
+    drawText(fb, "G:", panel_x + 80, cy, gui.style.text, 8);
+    if (drawBtn(fb, panel_x + 96, dec, 18, 16, "-", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 1, -adjv);
+    }
+    if (drawBtn(fb, panel_x + 116, dec, 18, 16, "+", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 1, adjv);
+    }
+    drawText(fb, "B:", panel_x + 142, cy, gui.style.text, 8);
+    if (drawBtn(fb, panel_x + 158, dec, 18, 16, "-", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 2, -adjv);
+    }
+    if (drawBtn(fb, panel_x + 178, dec, 18, 16, "+", &gui.style, mx, my, clicked)) {
+        adjustField(&gui.style, field_tags[editor_state.active_field], 2, adjv);
+    }
+
+    const preview_color = (0xFF << 24) | (cr << 16) | (cg << 8) | cb;
+    fillRect(fb, panel_x + 220, dec, 40, 16, preview_color);
+    drawRectBorder(fb, panel_x + 220, dec, 40, 16, gui.style.border);
+
+    cy += 22;
+
+    drawText(fb, "Rounding:", panel_x + 20, cy, gui.style.text, 8);
+    if (drawBtn(fb, panel_x + 74, cy, 18, 16, "-", &gui.style, mx, my, clicked)) {
+        gui.style.rounding = if (gui.style.rounding > 4) gui.style.rounding - 4 else 0;
+    }
+    if (drawBtn(fb, panel_x + 94, cy, 18, 16, "+", &gui.style, mx, my, clicked)) {
+        gui.style.rounding = @min(32, gui.style.rounding + 4);
+    }
+
+    drawText(fb, "Shadow:", panel_x + 140, cy, gui.style.text, 8);
+    if (drawBtn(fb, panel_x + 194, cy, 18, 16, "-", &gui.style, mx, my, clicked)) {
+        gui.style.shadow = if (gui.style.shadow > 2) gui.style.shadow - 2 else 0;
+    }
+    if (drawBtn(fb, panel_x + 214, cy, 18, 16, "+", &gui.style, mx, my, clicked)) {
+        gui.style.shadow = @min(32, gui.style.shadow + 2);
+    }
+
+    cy += 22;
+    drawText(fb, "Supported Formats:", panel_x + 20, cy, gui.style.text, 8);
+    var fy = cy + 16;
+    drawText(fb, "WAV  - Uncompressed PCM audio", panel_x + 30, fy, gui.style.text_dim, 8);
+    fy += 14;
+    drawText(fb, "MP3  - MPEG Layer 3 audio", panel_x + 30, fy, gui.style.text_dim, 8);
+    fy += 14;
+    drawText(fb, "OGG  - Vorbis audio", panel_x + 30, fy, gui.style.text_dim, 8);
+    fy += 14;
+    drawText(fb, "FLAC - Free Lossless Audio", panel_x + 30, fy, gui.style.text_dim, 8);
+    fy += 14;
+    drawText(fb, "AIFF - Audio Interchange File", panel_x + 30, fy, gui.style.text_dim, 8);
 }
 
 fn simpleSin(x: f32) f32 {
