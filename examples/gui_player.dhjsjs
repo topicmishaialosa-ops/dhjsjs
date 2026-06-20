@@ -1,0 +1,39 @@
+fn draw_button(fb, x, y, w, h, color, label) {
+    fb_fill(fb, x, y, w, h, color);
+    hui i = 1;
+    while i < 10 {
+        fb_pixel(fb, x + w / 2 + i, y + h / 2, 0xFFFFFF);
+        i = i + 1;
+    }
+}
+
+fn main() int {
+    print("dhjsjs GUI Audio Player\n");
+    hui fb = fb_open();
+    hui w = fb_width(fb);
+    hui h = fb_height(fb);
+
+    fb_fill(fb, 0, 0, w, h, 0x1a1a2e);
+
+    hui bw = w / 5;
+    hui bh = 40;
+    hui by = h - bh - 10;
+
+    draw_button(fb, 10, by, bw, bh, 0x16213e, "Play");
+    draw_button(fb, 20 + bw, by, bw, bh, 0x0f3460, "Pause");
+    draw_button(fb, 30 + bw * 2, by, bw, bh, 0x533483, "Stop");
+    draw_button(fb, 40 + bw * 3, by, bw, bh, 0x533483, "Next");
+
+    fb_fill(fb, 10, 10, w - 20, h - 80, 0x16213e);
+    fb_fill(fb, 20, 20, w - 40, h - 100, 0x0f3460);
+
+    fb_fill(fb, 20, h / 2 - 40, 150, 80, 0x533483);
+
+    fb_fill(fb, w / 2 + 10, 30, 40, 40, 0xFF4444);
+    fb_fill(fb, w / 2 + 60, 30, 40, 40, 0x44FF44);
+    fb_fill(fb, w / 2 + 110, 30, 40, 40, 0x4444FF);
+    fb_fill(fb, w / 2 + 160, 30, 40, 40, 0xFFFF44);
+
+    fb_close(fb);
+    return 0;
+}

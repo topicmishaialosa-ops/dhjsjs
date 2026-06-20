@@ -1100,6 +1100,479 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.syscall();
         return;
     }
+    if (eq(name, "wavplay") or eq(name, "mp3play")) {
+        const ch = n.first_child;
+        if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const wp_parent = cb.pos;
+        cb.jneRel32(0);
+
+        cb.popR(cg.R8);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const wp_argv0 = "media_player\x00";
+        cb.byte(@as(u8, @intCast(wp_argv0.len)));
+        for (wp_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const wp_exe = "./media_player\x00";
+        cb.byte(@as(u8, @intCast(wp_exe.len)));
+        for (wp_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R8);
+        cb.pushR(cg.R9);
+
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const wp_parent_pos = cb.pos;
+        patch32(cb, wp_parent + 2, @as(i32, @intCast(wp_parent_pos)) - @as(i32, @intCast(wp_parent + 6)));
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.R10, 0);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.addRImm32(cg.RSP, 8);
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "playerapp")) {
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const pp_parent = cb.pos;
+        cb.jneRel32(0);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const pp_argv0 = "media_player\x00";
+        cb.byte(@as(u8, @intCast(pp_argv0.len)));
+        for (pp_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const pp_exe = "./media_player\x00";
+        cb.byte(@as(u8, @intCast(pp_exe.len)));
+        for (pp_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R9);
+
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const pp_parent_pos = cb.pos;
+        patch32(cb, pp_parent + 2, @as(i32, @intCast(pp_parent_pos)) - @as(i32, @intCast(pp_parent + 6)));
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.R10, 0);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "audioplay")) {
+        const ch = n.first_child;
+        if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const aud_parent = cb.pos;
+        cb.jneRel32(0);
+
+        cb.popR(cg.R8);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const aud_argv0 = "media_player\x00";
+        cb.byte(@as(u8, @intCast(aud_argv0.len)));
+        for (aud_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const aud_exe = "./media_player\x00";
+        cb.byte(@as(u8, @intCast(aud_exe.len)));
+        for (aud_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        // Push argv in reverse: argv[2]=NULL, [1]=path, [0]="media_player"
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX); // argv[2] = NULL
+        cb.pushR(cg.R8);                            // argv[1] = path
+        cb.pushR(cg.R9);                            // argv[0] = "media_player"
+
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const aud_parent_pos = cb.pos;
+        patch32(cb, aud_parent + 2, @as(i32, @intCast(aud_parent_pos)) - @as(i32, @intCast(aud_parent + 6)));
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.R10, 0);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.addRImm32(cg.RSP, 8);
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "audio_init")) {
+        // audio_init(rate, channels, fmt) -> returns dsp_fd (or -1)
+        var ai: usize = 0; var av: [3]i64 = .{44100, 2, 0x10};
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and ai < 3) {
+            const cn = &pool[@as(usize, @intCast(ch))];
+            if (cn.kind == .int_lit) av[ai] = strToInt(cn.val_start[0..cn.val_len]);
+            ai += 1; ch = cn.next_sibling;
+        }
+        // embed "/dev/dsp\0"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2);
+        cb.byte(0xEB);
+        const dsp_str2 = "/dev/dsp\x00";
+        cb.byte(@as(u8, @intCast(dsp_str2.len)));
+        for (dsp_str2) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRImm64(cg.RSI, 2);
+        cb.movRImm64(cg.RAX, 2);
+        cb.syscall();
+        cb.pushR(cg.RAX); // dsp_fd
+
+        // reset
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRImm64(cg.RSI, 0x80005000);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+
+        // format
+        cb.popR(cg.RDI);
+        cb.pushR(cg.RDI);
+        cb.subRImm32(cg.RSP, 16);
+        cb.movImm32RSP(0, @as(u32, @intCast(av[2])));
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 4);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        // channels
+        cb.popR(cg.RDI);
+        cb.pushR(cg.RDI);
+        cb.subRImm32(cg.RSP, 16);
+        cb.movImm32RSP(0, @as(u32, @intCast(av[1])));
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 4);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        // speed
+        cb.popR(cg.RDI);
+        cb.subRImm32(cg.RSP, 16);
+        cb.movImm32RSP(0, @as(u32, @intCast(av[0])));
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 4);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        // dsp_fd still in RDI -> RAX for return
+        cb.movRR(cg.RAX, cg.RDI);
+        return;
+    }
+    if (eq(name, "audio_write")) {
+        // audio_write(fd, ptr, len)
+        var is_expr: [6]bool = .{false} ** 6;
+        var args_list: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+        var arg_i: usize = 0;
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and arg_i < 6) {
+            args_list[arg_i] = ch;
+            const cn = &pool[@as(usize, @intCast(ch))];
+            is_expr[arg_i] = cn.kind != .int_lit;
+            arg_i += 1; ch = cn.next_sibling;
+        }
+        var ei: usize = 0;
+        while (ei < arg_i) : (ei += 1) { if (is_expr[ei]) { compileExprNode(args_list[ei], pool, cb, vars, vc, errs); cb.pushR(cg.RAX); } }
+        const regs_aw = [_]u8{ cg.RDI, cg.RSI, cg.RDX, cg.R10, cg.R8, cg.R9 };
+        var ri_aw: usize = arg_i;
+        while (ri_aw > 0) { ri_aw -= 1;
+            if (is_expr[ri_aw]) { cb.popR(regs_aw[ri_aw]); }
+            else if (args_list[ri_aw] != parser_mod.NO_NODE) {
+                const cn = &pool[@as(usize, @intCast(args_list[ri_aw]))];
+                cb.movRImm64(regs_aw[ri_aw], @as(u64, @intCast(if (cn.kind == .int_lit) strToInt(cn.val_start[0..cn.val_len]) else 0)));
+            }
+        }
+        cb.movRImm64(cg.RAX, 1);
+        cb.syscall();
+        return;
+    }
+    if (eq(name, "audio_close")) {
+        // audio_close(fd)
+        var fd: i64 = 0;
+        const ch2 = n.first_child;
+        if (ch2 != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch2))];
+            if (cn.kind == .int_lit) fd = strToInt(cn.val_start[0..cn.val_len]);
+        }
+        cb.movRImm64(cg.RDI, @as(u64, @intCast(fd)));
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        return;
+    }
+    if (eq(name, "audio_pause") or eq(name, "audio_stop")) {
+        // audio_stop(fd) - close DSP temporarily (ioctl reset)
+        var fd: i64 = 0;
+        const ch3 = n.first_child;
+        if (ch3 != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch3))];
+            if (cn.kind == .int_lit) fd = strToInt(cn.val_start[0..cn.val_len]);
+        }
+        cb.movRImm64(cg.RDI, @as(u64, @intCast(fd)));
+        cb.movRImm64(cg.RSI, 0x80005000);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        return;
+    }
+    if (eq(name, "audio_play")) {
+        // audio_play(fd) - unmute/resume after stop
+        var fd: i64 = 0;
+        const ch4 = n.first_child;
+        if (ch4 != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch4))];
+            if (cn.kind == .int_lit) fd = strToInt(cn.val_start[0..cn.val_len]);
+        }
+        cb.movRImm64(cg.RDI, @as(u64, @intCast(fd)));
+        cb.movRImm64(cg.RSI, 0x80045005); // SNDCTL_DSP_SETFMT just to resume
+        cb.subRImm32(cg.RSP, 16);
+        cb.movImm32RSP(0, 0x10); // AFMT_S16_LE
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 4);
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+        return;
+    }
+    // --- Framebuffer built-ins ---
+    if (eq(name, "fb_open")) {
+        // Allocate struct {fb_ptr, fd, xres, yres} + var_info buffer
+        cb.subRImm32(cg.RSP, 232); // 32 struct + 200 var_info
+
+        // open /dev/fb0
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const fb_str = "/dev/fb0\x00";
+        cb.byte(@as(u8, @intCast(fb_str.len)));
+        for (fb_str) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRImm64(cg.RSI, 2);
+        cb.movRImm64(cg.RAX, 2);
+        cb.syscall();
+        cb.movMemR64(cg.RSP, 8, cg.RAX); // struct.fd at +8
+
+        // mmap 8MB
+        cb.movRImm64(cg.RDI, 0);
+        cb.movRImm64(cg.RSI, 0x800000);
+        cb.movRImm64(cg.RDX, 3);
+        cb.movRImm64(cg.R10, 1);
+        cb.movRMem64(cg.R8, cg.RSP, 8); // fd
+        cb.movRImm64(cg.R9, 0);
+        cb.movRImm64(cg.RAX, 9);
+        cb.syscall();
+        cb.movMemR64(cg.RSP, 0, cg.RAX); // struct.fb_ptr at +0
+
+        // ioctl FBIOGET_VSCREENINFO
+        cb.movRMem64(cg.RDI, cg.RSP, 8); // fd
+        cb.movRImm64(cg.RSI, 0x4600);
+        cb.leaRMem(cg.RDX, cg.RSP, 32); // var_info after struct
+        cb.movRImm64(cg.RAX, 16);
+        cb.syscall();
+        // read xres = var_info[0], yres = var_info[4]
+        cb.movRMem64(cg.R8, cg.RSP, 32 + 0);
+        cb.movMemR64(cg.RSP, 16, cg.R8); // struct.xres at +16
+        cb.movRMem64(cg.R8, cg.RSP, 32 + 4);
+        cb.movMemR64(cg.RSP, 24, cg.R8); // struct.yres at +24
+
+        // return RSP (struct pointer)
+        cb.movRR(cg.RAX, cg.RSP);
+        return;
+    }
+    if (eq(name, "fb_close")) {
+        const ch5 = n.first_child;
+        if (ch5 != parser_mod.NO_NODE) { compileExprNode(ch5, pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        // struct {fb_ptr, fd, xres, yres}
+        // fb_ptr at +0, fd at +8
+        cb.pushR(cg.RAX);
+        cb.movRMem64(cg.RDI, cg.RAX, 8); // fd
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.popR(cg.RAX);
+        cb.movRMem64(cg.RDI, cg.RAX, 0); // fb_ptr
+        cb.movRImm64(cg.RSI, 0x800000);
+        cb.movRImm64(cg.RAX, 11);
+        cb.syscall();
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "fb_width")) {
+        const ch6 = n.first_child;
+        if (ch6 != parser_mod.NO_NODE) { compileExprNode(ch6, pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        // struct: {fb_ptr, fd, xres, yres} at RAX
+        // xres at +16
+        cb.movRMem64(cg.RAX, cg.RAX, 16);
+        return;
+    }
+    if (eq(name, "fb_height")) {
+        const ch7 = n.first_child;
+        if (ch7 != parser_mod.NO_NODE) { compileExprNode(ch7, pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        // yres at +24
+        cb.movRMem64(cg.RAX, cg.RAX, 24);
+        return;
+    }
+    if (eq(name, "fb_pixel")) {
+        var arg_i_fb: usize = 0;
+        var args_list_fb: [4]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 4;
+        var ch_fb = n.first_child;
+        while (ch_fb != parser_mod.NO_NODE and arg_i_fb < 4) {
+            args_list_fb[arg_i_fb] = ch_fb;
+            ch_fb = pool[@as(usize, @intCast(ch_fb))].next_sibling;
+            arg_i_fb += 1;
+        }
+        if (args_list_fb[0] != parser_mod.NO_NODE) { compileExprNode(args_list_fb[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        // struct: {fb_ptr, fd, xres, yres}
+        cb.movRMem64(cg.R14, cg.RAX, 0);  // fb_ptr
+        cb.movRMem64(cg.RDI, cg.RAX, 16); // width (xres)
+
+        if (args_list_fb[1] != parser_mod.NO_NODE) { compileExprNode(args_list_fb[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fb[2] != parser_mod.NO_NODE) { compileExprNode(args_list_fb[2], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fb[3] != parser_mod.NO_NODE) { compileExprNode(args_list_fb[3], pool, cb, vars, vc, errs); } else { cb.movRImm64(cg.RAX, 0xFFFFFFFF); }
+
+        cb.popR(cg.RCX);
+        cb.popR(cg.RDX);
+        // RCX = y, RDX = x
+        cb.imulRR(cg.RCX, cg.RDI);
+        cb.addRR(cg.RCX, cg.RDX);
+        cb.shlRImm8(cg.RCX, 2);
+        cb.addRR(cg.RCX, cg.R14);
+        cb.movMemR64(cg.RCX, 0, cg.RAX);
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "fb_fill")) {
+        var arg_i_fbf: usize = 0;
+        var args_list_fbf: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+        var ch_fbf = n.first_child;
+        while (ch_fbf != parser_mod.NO_NODE and arg_i_fbf < 6) {
+            args_list_fbf[arg_i_fbf] = ch_fbf;
+            ch_fbf = pool[@as(usize, @intCast(ch_fbf))].next_sibling;
+            arg_i_fbf += 1;
+        }
+        if (args_list_fbf[0] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        // struct: {fb_ptr, fd, xres, yres}
+        cb.movRMem64(cg.R14, cg.RAX, 0);  // fb_ptr
+        cb.movRMem64(cg.RDI, cg.RAX, 16); // width (xres)
+
+        if (args_list_fbf[1] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fbf[2] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[2], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fbf[3] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[3], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fbf[4] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[4], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (args_list_fbf[5] != parser_mod.NO_NODE) { compileExprNode(args_list_fbf[5], pool, cb, vars, vc, errs); } else { cb.movRImm64(cg.RAX, 0xFFFFFFFF); }
+
+        cb.popR(cg.R15);
+        cb.popR(cg.R11);
+        cb.popR(cg.R10);
+        cb.popR(cg.R9);
+        cb.popR(cg.R8);
+
+        cb.xorRR(cg.R12, cg.R12);
+        const fb_fill_y_loop = cb.pos;
+        cb.cmpRR(cg.R12, cg.R11);
+        const fb_fill_y_done = cb.pos;
+        cb.jgeRel32(0);
+
+        cb.xorRR(cg.R13, cg.R13);
+        const fb_fill_x_check = cb.pos;
+        cb.cmpRR(cg.R13, cg.R10);
+        const fb_fill_x_done = cb.pos;
+        cb.jgeRel32(0);
+
+        cb.movRR(cg.RAX, cg.R9);
+        cb.addRR(cg.RAX, cg.R12);
+        cb.imulRR(cg.RAX, cg.RDI);
+        cb.addRR(cg.RAX, cg.R8);
+        cb.addRR(cg.RAX, cg.R13);
+        cb.shlRImm8(cg.RAX, 2);
+        cb.addRR(cg.RAX, cg.R14);
+        cb.movMemR64(cg.RAX, 0, cg.R15);
+
+        cb.addRImm32(cg.R13, 1);
+        cb.jmpRel32(@as(i32, @intCast(fb_fill_x_check)) - @as(i32, @intCast(cb.pos + 5)));
+
+        const fb_fill_x_end = cb.pos;
+        patch32(cb, fb_fill_x_done + 2, @as(i32, @intCast(fb_fill_x_end)) - @as(i32, @intCast(fb_fill_x_done + 6)));
+
+        cb.addRImm32(cg.R12, 1);
+        cb.jmpRel32(@as(i32, @intCast(fb_fill_y_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+        const fb_fill_y_end = cb.pos;
+        patch32(cb, fb_fill_y_done + 2, @as(i32, @intCast(fb_fill_y_end)) - @as(i32, @intCast(fb_fill_y_done + 6)));
+
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
     cb.movRImm64(cg.RAX, 0);
 }
 

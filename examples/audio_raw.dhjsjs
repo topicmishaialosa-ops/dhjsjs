@@ -1,0 +1,29 @@
+fn main() int {
+    print("dhjsjs Raw PCM Audio Playback\n");
+
+    hui fd = audio_init(44100, 2, 0x10);
+    if fd == 0xFFFFFFFF {
+        print("Failed to open audio device\n");
+        return 1;
+    }
+
+    hui buf[1024];
+    hui freq = 440;
+    hui amp = 16000;
+    hui sr = 44100;
+    hui i = 0;
+    while i < 44100 * 2 {
+        hui j = 0;
+        while j < 512 {
+            hui t = i + j;
+            buf[j] = amp * sin(t * 2 * 314 / sr);
+            j = j + 1;
+        }
+        audio_write(fd, buf, 2048);
+        i = i + 512;
+    }
+
+    audio_close(fd);
+    print("Playback complete\n");
+    return 0;
+}

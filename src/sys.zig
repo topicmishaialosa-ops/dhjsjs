@@ -499,3 +499,56 @@ fn memEql(a: []const u8, b: []const u8) bool {
     for (a, 0..) |av, i| if (av != b[i]) return false;
     return true;
 }
+
+// --- OSS Audio -----------------------------------------------------------
+pub const SNDCTL_DSP_SETFMT: usize  = 0x80045005;
+pub const SNDCTL_DSP_CHANNELS: usize = 0x80045006;
+pub const SNDCTL_DSP_SPEED: usize    = 0x8004500A;
+pub const SNDCTL_DSP_RESET: usize    = 0x80005000;
+
+pub const AFMT_U8: i32      = 0x00000008;
+pub const AFMT_S16_LE: i32  = 0x00000010;
+pub const AFMT_S16_BE: i32  = 0x00000020;
+pub const AFMT_S32_LE: i32  = 0x00000080;
+
+// --- Framebuffer (/dev/fb0) -----------------------------------------------
+pub const FBIOGET_VSCREENINFO: usize = 0x4600;
+pub const FBIOPUT_VSCREENINFO: usize = 0x4601;
+pub const FBIOGET_FSCREENINFO: usize = 0x4602;
+
+pub const FbVarScreenInfo = extern struct {
+    xres: u32, yres: u32, xres_virtual: u32, yres_virtual: u32,
+    xoffset: u32, yoffset: u32, bits_per_pixel: u32, grayscale: u32,
+    red: [4]u32, green: [4]u32, blue: [4]u32, transp: [4]u32,
+    nonstd: u32, activate: u32, height: u32, width: u32,
+    accel_flags: u32, pixclock: u32, left_margin: u32, right_margin: u32,
+    upper_margin: u32, lower_margin: u32, hsync_len: u32, vsync_len: u32,
+    sync: u32, vmode: u32, rotate: u32, reserved: [5]u32,
+};
+
+pub const FbFixScreenInfo = extern struct {
+    id: [16]u8, smem_start: u64, smem_len: u32, type: u32, type_aux: u32,
+    visual: u32, xpanstep: u32, ypanstep: u32, ywrapstep: u32,
+    line_length: u32, mmio_start: u64, mmio_len: u32, accel: u32,
+    capabilities: u16, reserved: [2]u16,
+};
+
+// --- WAV header -----------------------------------------------------------
+pub const WavHeader = extern struct {
+    riff: [4]u8,
+    file_len: u32,
+    wave: [4]u8,
+    fmt_id: [4]u8,
+    fmt_len: u32,
+    audio_fmt: u16,
+    channels: u16,
+    sample_rate: u32,
+    byte_rate: u32,
+    block_align: u16,
+    bits_per_sample: u16,
+};
+
+pub const WavDataHeader = extern struct {
+    data_id: [4]u8,
+    data_len: u32,
+};

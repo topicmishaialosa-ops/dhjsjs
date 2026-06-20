@@ -1,0 +1,17 @@
+fn main() int {
+    print("dhjsjs Media Player Demo\n");
+    print("=======================\n");
+    print("Playing WAV file via media_player:\n");
+    wavplay("/home/krasava/dhjsjs/test.wav");
+
+    print("Playing MP3 via media_player:\n");
+    mp3play("/home/krasava/dhjsjs/test.wav");
+
+    print("Playing any format via audioplay:\n");
+    audioplay("/home/krasava/dhjsjs/test.wav");
+
+    print("Launching GUI media player application...\n");
+    playerapp();
+
+    return 0;
+}
