@@ -30,6 +30,32 @@ pub const Style = struct {
     title_text: u32,
     check_bg: u32,
     check_mark: u32,
+    scrollbar_bg: u32,
+    scrollbar_thumb: u32,
+    rounding: u8,
+    window_rounding: u8,
+    shadow: u8,
+    spacing: u8,
+    padding: u8,
+
+    pub fn fromBase(base: Style) Style {
+        return base;
+    }
+
+    pub fn setBg(s: *Style, c: u32) void { s.bg = c; }
+    pub fn setPanelBg(s: *Style, c: u32) void { s.panel_bg = c; }
+    pub fn setButtonBg(s: *Style, c: u32) void { s.button_bg = c; }
+    pub fn setButtonHover(s: *Style, c: u32) void { s.button_hover = c; }
+    pub fn setButtonActive(s: *Style, c: u32) void { s.button_active = c; }
+    pub fn setButtonText(s: *Style, c: u32) void { s.button_text = c; }
+    pub fn setText(s: *Style, c: u32) void { s.text = c; }
+    pub fn setAccent(s: *Style, c: u32) void { s.accent = c; }
+    pub fn setBorder(s: *Style, c: u32) void { s.border = c; }
+    pub fn setRounding(s: *Style, r: u8) void { s.rounding = r; }
+    pub fn setWindowRounding(s: *Style, r: u8) void { s.window_rounding = r; }
+    pub fn setShadow(s: *Style, v: u8) void { s.shadow = v; }
+    pub fn setSpacing(s: *Style, v: u8) void { s.spacing = v; }
+    pub fn setPadding(s: *Style, v: u8) void { s.padding = v; }
 };
 
 pub const style_dark = Style{
@@ -44,6 +70,7 @@ pub const style_dark = Style{
     .header_bg = 0xFF2D2D2D, .header_text = 0xFFCCCCCC,
     .title_bg = 0xFF2D2D2D, .title_text = 0xFFCCCCCC,
     .check_bg = 0xFF1E1E1E, .check_mark = 0xFFCCCCCC,
+    .scrollbar_bg = 0xFF3C3C3C, .scrollbar_thumb = 0xFF0E639C, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_light = Style{
@@ -58,6 +85,7 @@ pub const style_light = Style{
     .header_bg = 0xFFE8E8E8, .header_text = 0xFF222222,
     .title_bg = 0xFFE8E8E8, .title_text = 0xFF222222,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFF222222,
+    .scrollbar_bg = 0xFFCCCCCC, .scrollbar_thumb = 0xFF0078D4, .rounding = 4, .window_rounding = 6, .shadow = 15, .spacing = 4, .padding = 4,
 };
 
 pub const style_dracula = Style{
@@ -72,6 +100,7 @@ pub const style_dracula = Style{
     .header_bg = 0xFF2D2F3E, .header_text = 0xFFF8F8F2,
     .title_bg = 0xFF2D2F3E, .title_text = 0xFFBD93F9,
     .check_bg = 0xFF1E1F2E, .check_mark = 0xFF50FA7B,
+    .scrollbar_bg = 0xFF44475A, .scrollbar_thumb = 0xFFBD93F9, .rounding = 6, .window_rounding = 8, .shadow = 25, .spacing = 4, .padding = 4,
 };
 
 pub const style_nord = Style{
@@ -86,6 +115,7 @@ pub const style_nord = Style{
     .header_bg = 0xFF3B4252, .header_text = 0xFFECEFF4,
     .title_bg = 0xFF3B4252, .title_text = 0xFF88C0D0,
     .check_bg = 0xFF2E3440, .check_mark = 0xFFA3BE8C,
+    .scrollbar_bg = 0xFF434C5E, .scrollbar_thumb = 0xFF88C0D0, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_solarized_dark = Style{
@@ -100,6 +130,8 @@ pub const style_solarized_dark = Style{
     .header_bg = 0xFF073642, .header_text = 0xFF93A1A1,
     .title_bg = 0xFF073642, .title_text = 0xFF268BD2,
     .check_bg = 0xFF002B36, .check_mark = 0xFF859900,
+
+    .scrollbar_bg = 0xFF184C56, .scrollbar_thumb = 0xFF268BD2, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_solarized_light = Style{
@@ -114,6 +146,8 @@ pub const style_solarized_light = Style{
     .header_bg = 0xFFEEE8D5, .header_text = 0xFF586E75,
     .title_bg = 0xFFEEE8D5, .title_text = 0xFF268BD2,
     .check_bg = 0xFFFDF6E3, .check_mark = 0xFF859900,
+
+    .scrollbar_bg = 0xFFE4DDC9, .scrollbar_thumb = 0xFF268BD2, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_monokai = Style{
@@ -128,6 +162,8 @@ pub const style_monokai = Style{
     .header_bg = 0xFF2D2E27, .header_text = 0xFFF8F8F2,
     .title_bg = 0xFF2D2E27, .title_text = 0xFFA6E22E,
     .check_bg = 0xFF1A1A16, .check_mark = 0xFFFD971F,
+
+    .scrollbar_bg = 0xFF3E3D32, .scrollbar_thumb = 0xFFA6E22E, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_one_dark = Style{
@@ -142,6 +178,8 @@ pub const style_one_dark = Style{
     .header_bg = 0xFF313640, .header_text = 0xFFABB2BF,
     .title_bg = 0xFF313640, .title_text = 0xFF61AFEF,
     .check_bg = 0xFF21252B, .check_mark = 0xFF98C379,
+
+    .scrollbar_bg = 0xFF3E4451, .scrollbar_thumb = 0xFF61AFEF, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_github_light = Style{
@@ -156,6 +194,8 @@ pub const style_github_light = Style{
     .header_bg = 0xFFF6F8FA, .header_text = 0xFF24292E,
     .title_bg = 0xFFF6F8FA, .title_text = 0xFF0366D6,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFF28A745,
+
+    .scrollbar_bg = 0xFFD1D5DA, .scrollbar_thumb = 0xFF0366D6, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_gruvbox_dark = Style{
@@ -170,6 +210,8 @@ pub const style_gruvbox_dark = Style{
     .header_bg = 0xFF32302F, .header_text = 0xFFEBDBB2,
     .title_bg = 0xFF32302F, .title_text = 0xFFD79921,
     .check_bg = 0xFF1D2021, .check_mark = 0xFF98971A,
+
+    .scrollbar_bg = 0xFF3C3836, .scrollbar_thumb = 0xFFD79921, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_gruvbox_light = Style{
@@ -184,6 +226,8 @@ pub const style_gruvbox_light = Style{
     .header_bg = 0xFFF2E5BC, .header_text = 0xFF3C3836,
     .title_bg = 0xFFF2E5BC, .title_text = 0xFFB57614,
     .check_bg = 0xFFFBF1C7, .check_mark = 0xFF98971A,
+
+    .scrollbar_bg = 0xFFE6D5AA, .scrollbar_thumb = 0xFFB57614, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_catppuccin = Style{
@@ -198,6 +242,8 @@ pub const style_catppuccin = Style{
     .header_bg = 0xFF252540, .header_text = 0xFFCDD6F4,
     .title_bg = 0xFF252540, .title_text = 0xFFCBA6F7,
     .check_bg = 0xFF181825, .check_mark = 0xFFA6E3A1,
+
+    .scrollbar_bg = 0xFF363650, .scrollbar_thumb = 0xFFCBA6F7, .rounding = 6, .window_rounding = 8, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_tokyo_night = Style{
@@ -212,6 +258,8 @@ pub const style_tokyo_night = Style{
     .header_bg = 0xFF222335, .header_text = 0xFFA9B1D6,
     .title_bg = 0xFF222335, .title_text = 0xFF7AA2F7,
     .check_bg = 0xFF13131D, .check_mark = 0xFF9ECE6A,
+
+    .scrollbar_bg = 0xFF2F3048, .scrollbar_thumb = 0xFF7AA2F7, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_ayu_dark = Style{
@@ -226,6 +274,8 @@ pub const style_ayu_dark = Style{
     .header_bg = 0xFF141820, .header_text = 0xFFC7C7C7,
     .title_bg = 0xFF141820, .title_text = 0xFFF29668,
     .check_bg = 0xFF06090E, .check_mark = 0xFF87CEEB,
+
+    .scrollbar_bg = 0xFF1F2430, .scrollbar_thumb = 0xFFF29668, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_ayu_light = Style{
@@ -240,6 +290,8 @@ pub const style_ayu_light = Style{
     .header_bg = 0xFFF0F0F0, .header_text = 0xFF333333,
     .title_bg = 0xFFF0F0F0, .title_text = 0xFFF29668,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFF86B300,
+
+    .scrollbar_bg = 0xFFCCCCCC, .scrollbar_thumb = 0xFFF29668, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_material_dark = Style{
@@ -254,6 +306,8 @@ pub const style_material_dark = Style{
     .header_bg = 0xFF2C2C2C, .header_text = 0xFFEEEEEE,
     .title_bg = 0xFF2C2C2C, .title_text = 0xFF4CAF50,
     .check_bg = 0xFF1A1A1A, .check_mark = 0xFF4CAF50,
+
+    .scrollbar_bg = 0xFF383838, .scrollbar_thumb = 0xFF4CAF50, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_material_light = Style{
@@ -268,6 +322,8 @@ pub const style_material_light = Style{
     .header_bg = 0xFFF5F5F5, .header_text = 0xFF333333,
     .title_bg = 0xFFF5F5F5, .title_text = 0xFF1976D2,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFF1976D2,
+
+    .scrollbar_bg = 0xFFBDBDBD, .scrollbar_thumb = 0xFF1976D2, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_high_contrast = Style{
@@ -282,6 +338,8 @@ pub const style_high_contrast = Style{
     .header_bg = 0xFF0D0D0D, .header_text = 0xFFFFFFFF,
     .title_bg = 0xFF0D0D0D, .title_text = 0xFFFFFFFF,
     .check_bg = 0xFF000000, .check_mark = 0xFFFFFFFF,
+
+    .scrollbar_bg = 0xFFFFFFFF, .scrollbar_thumb = 0xFFFFFFFF, .rounding = 0, .window_rounding = 0, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_retro_terminal = Style{
@@ -296,6 +354,8 @@ pub const style_retro_terminal = Style{
     .header_bg = 0xFF111111, .header_text = 0xFF33FF33,
     .title_bg = 0xFF111111, .title_text = 0xFF33FF33,
     .check_bg = 0xFF050505, .check_mark = 0xFF33FF33,
+
+    .scrollbar_bg = 0xFF33FF33, .scrollbar_thumb = 0xFF33FF33, .rounding = 0, .window_rounding = 0, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_forest = Style{
@@ -310,6 +370,8 @@ pub const style_forest = Style{
     .header_bg = 0xFF253725, .header_text = 0xFFD4E7D4,
     .title_bg = 0xFF253725, .title_text = 0xFF6BBF6B,
     .check_bg = 0xFF152215, .check_mark = 0xFFA8D8A8,
+
+    .scrollbar_bg = 0xFF2F452F, .scrollbar_thumb = 0xFF6BBF6B, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_ocean = Style{
@@ -324,6 +386,8 @@ pub const style_ocean = Style{
     .header_bg = 0xFF142538, .header_text = 0xFFD0E8F0,
     .title_bg = 0xFF142538, .title_text = 0xFF40B4D0,
     .check_bg = 0xFF091420, .check_mark = 0xFF60D0A0,
+
+    .scrollbar_bg = 0xFF1B344E, .scrollbar_thumb = 0xFF40B4D0, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_sunset = Style{
@@ -338,6 +402,8 @@ pub const style_sunset = Style{
     .header_bg = 0xFF241C16, .header_text = 0xFFE8D5C0,
     .title_bg = 0xFF241C16, .title_text = 0xFFE87540,
     .check_bg = 0xFF120E0A, .check_mark = 0xFFF0C040,
+
+    .scrollbar_bg = 0xFF33281E, .scrollbar_thumb = 0xFFE87540, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_candy = Style{
@@ -352,6 +418,8 @@ pub const style_candy = Style{
     .header_bg = 0xFF281A2C, .header_text = 0xFFF0E0F0,
     .title_bg = 0xFF281A2C, .title_text = 0xFFE060B0,
     .check_bg = 0xFF140A16, .check_mark = 0xFF80E0B0,
+
+    .scrollbar_bg = 0xFF3A2440, .scrollbar_thumb = 0xFFE060B0, .rounding = 6, .window_rounding = 8, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_monochrome = Style{
@@ -366,6 +434,8 @@ pub const style_monochrome = Style{
     .header_bg = 0xFF222222, .header_text = 0xFFE0E0E0,
     .title_bg = 0xFF222222, .title_text = 0xFFCCCCCC,
     .check_bg = 0xFF121212, .check_mark = 0xFFE0E0E0,
+
+    .scrollbar_bg = 0xFF333333, .scrollbar_thumb = 0xFFB0B0B0, .rounding = 0, .window_rounding = 0, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_rose_pine = Style{
@@ -380,6 +450,8 @@ pub const style_rose_pine = Style{
     .header_bg = 0xFF1F1D2E, .header_text = 0xFFE0DEF4,
     .title_bg = 0xFF1F1D2E, .title_text = 0xFFEBBCBA,
     .check_bg = 0xFF13101D, .check_mark = 0xFF9CCFD8,
+
+    .scrollbar_bg = 0xFF2A273F, .scrollbar_thumb = 0xFFEBBCBA, .rounding = 6, .window_rounding = 8, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_everforest = Style{
@@ -394,6 +466,8 @@ pub const style_everforest = Style{
     .header_bg = 0xFF343F44, .header_text = 0xFFD3C6AA,
     .title_bg = 0xFF343F44, .title_text = 0xFFA7C080,
     .check_bg = 0xFF232A2E, .check_mark = 0xFFE69875,
+
+    .scrollbar_bg = 0xFF3D4A50, .scrollbar_thumb = 0xFFA7C080, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const style_nord_light = Style{
@@ -408,6 +482,8 @@ pub const style_nord_light = Style{
     .header_bg = 0xFFE6E8ED, .header_text = 0xFF2E3440,
     .title_bg = 0xFFE6E8ED, .title_text = 0xFF5E81AC,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFFA3BE8C,
+
+    .scrollbar_bg = 0xFFD8DCE5, .scrollbar_thumb = 0xFF5E81AC, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
 pub const WidgetStateType = enum(u8) {
@@ -614,7 +690,9 @@ pub const Gui = struct {
 
     pub fn button(self: *Gui, label_text: []const u8) bool {
         const id = self.nextId();
-        var area = self.allocSpace(@as(u32, @intCast(label_text.len * 10 + 20)), 28);
+        const pad = @as(u32, self.style.padding);
+        const bh: u32 = 24 + pad;
+        var area = self.allocSpace(@as(u32, @intCast(label_text.len * 10 + pad * 2 + 20)), bh);
         if (area.w < 10) area.w = 80;
 
         const hovered = self.testHot(id, area.x, area.y, area.w, area.h);
@@ -632,12 +710,16 @@ pub const Gui = struct {
             else if (hovered) self.style.button_hover
             else self.style.button_bg;
 
-        fillRect(self.fb, area.x, area.y, area.w, area.h, bg);
+        const r = @min(self.style.rounding, @as(u8, @intCast(@min(area.w, area.h) / 2)));
+        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        if (hovered) {
+            drawShadow(self.fb, area.x, area.y, area.w, area.h, self.style.shadow, r);
+        }
         drawRectBorder(self.fb, area.x, area.y, area.w, area.h, self.style.border);
         const tw = @as(i32, @intCast(label_text.len * 8));
         drawTextAt(self.fb, label_text,
             area.x + @divTrunc(@as(i32, @intCast(area.w)), 2) - @divTrunc(tw, 2),
-            area.y + 6,
+            area.y + @as(i32, @intCast(bh)) / 2 - 4,
             self.style.button_text, 8);
 
         return clicked;
@@ -718,8 +800,8 @@ pub const Gui = struct {
 
         const bg = self.style.input_bg;
         const border = if (is_focused) self.style.accent else self.style.input_border;
-
-        fillRect(self.fb, area.x, area.y, area.w, area.h, bg);
+        const r = @min(self.style.rounding, @as(u8, 4));
+        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
         drawRectBorder(self.fb, area.x, area.y, area.w, area.h, border);
 
         var display_buf: [257]u8 = undefined;
@@ -769,11 +851,12 @@ pub const Gui = struct {
         const bx = area.x;
         const by = area.y + 2;
         const border = if (hovered) self.style.accent else self.style.border;
-        fillRect(self.fb, bx, by, cw, ch, self.style.check_bg);
+        const r = @min(self.style.rounding, @as(u8, 4));
+        fillRoundedRect(self.fb, bx, by, cw, ch, r, self.style.check_bg);
         drawRectBorder(self.fb, bx, by, cw, ch, border);
 
         if (checked.*) {
-            drawTextAt(self.fb, "X", bx + 4, by + 2, self.style.check_mark, 8);
+            fillRoundedRect(self.fb, bx + 3, by + 3, cw - 6, ch - 6, @as(u8, @intCast(if (r > 2) r - 2 else 0)), self.style.check_mark);
         }
 
         drawTextAt(self.fb, label_text, bx + @as(i32, @intCast(cw)) + 6, by + 1, self.style.text, 8);
@@ -823,16 +906,17 @@ pub const Gui = struct {
 
         const is_active = self.isActive(widget_id);
         const thumb_fill = if (is_active) self.style.accent_hover else self.style.slider_thumb;
+        const tr = @min(self.style.rounding, @as(u8, 4));
 
-        fillRect(self.fb, track_x, track_y, track_w, track_h, self.style.slider_track);
+        fillRoundedRect(self.fb, track_x, track_y, track_w, track_h, tr, self.style.slider_track);
 
         const fill_w: u32 = @intCast(@max(0, thumb_x - track_x));
         if (fill_w > 0) {
-            fillRect(self.fb, track_x, track_y, fill_w, track_h, self.style.accent);
+            fillRoundedRect(self.fb, track_x, track_y, fill_w, track_h, tr, self.style.accent);
         }
 
         const fr = @as(i32, @intCast(thumb_r));
-        fillRect(self.fb, thumb_x - fr, track_y - 2, fr * 2, track_h + 4, thumb_fill);
+        fillRoundedRect(self.fb, thumb_x - fr, track_y - 2, fr * 2, track_h + 4, tr + 2, thumb_fill);
         drawRectBorder(self.fb, thumb_x - fr, track_y - 2, fr * 2, track_h + 4, self.style.border);
 
         var lbl_buf: [32]u8 = undefined;
@@ -897,7 +981,8 @@ pub const Gui = struct {
         }
 
         const bg = if (hovered) self.style.button_hover else self.style.header_bg;
-        fillRect(self.fb, area.x, area.y, area.w, area.h, bg);
+        const r = @min(self.style.rounding, @as(u8, 4));
+        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
         drawRectBorder(self.fb, area.x, area.y, area.w, area.h, self.style.border);
 
         const arrow = if (open.*) "v" else ">";
@@ -913,13 +998,81 @@ pub const Gui = struct {
         return open.*;
     }
 
+    pub fn comboBox(self: *Gui, label_text: []const u8, items: []const []const u8, current: *usize) bool {
+        const id = self.nextId();
+        const state = self.getOrCreateState(id, .none);
+        const is_open = state.bool_val;
+
+        const bh: u32 = 24;
+        const tw = @as(u32, @intCast(label_text.len * 8 + 8));
+        var total_w = tw;
+        var mi: usize = 0;
+        while (mi < items.len) : (mi += 1) {
+            const iw = @as(u32, @intCast(items[mi].len * 8 + 16));
+            if (iw > total_w) total_w = iw;
+        }
+        if (total_w < 100) total_w = 100;
+
+        const area = self.allocSpace(total_w, bh);
+        const r = @min(self.style.rounding, @as(u8, 4));
+        const hovered = self.testHot(id, area.x, area.y, total_w, bh);
+
+        if (hovered and self.input.mouse_clicked) {
+            state.bool_val = !state.bool_val;
+            self.active_id = id;
+        }
+        if (self.isActive(id) and self.input.mouse_released) {
+            if (!hovered and is_open) {
+                var ci: usize = 0;
+                while (ci < items.len) : (ci += 1) {
+                    const iy = area.y + @as(i32, @intCast(bh)) + @as(i32, @intCast(ci * bh));
+                    if (self.input.mouse_y >= iy and self.input.mouse_y < iy + @as(i32, @intCast(bh))) {
+                        current.* = ci;
+                        state.bool_val = false;
+                        self.active_id = 0;
+                        return true;
+                    }
+                }
+                state.bool_val = false;
+            }
+            self.active_id = 0;
+        }
+
+        fillRoundedRect(self.fb, area.x, area.y, total_w, bh, r, self.style.input_bg);
+        drawRectBorder(self.fb, area.x, area.y, total_w, bh, self.style.input_border);
+        if (current.* < items.len) {
+            drawTextAt(self.fb, items[current.*], area.x + 6, area.y + 4, self.style.text, 8);
+        }
+        drawTextAt(self.fb, if (is_open) "v" else ">", area.x + @as(i32, @intCast(total_w)) - 14, area.y + 4, self.style.text_dim, 8);
+
+        if (is_open) {
+            var ci: usize = 0;
+            while (ci < items.len) : (ci += 1) {
+                const iy = area.y + @as(i32, @intCast(bh)) + @as(i32, @intCast(ci * bh));
+                const isel = ci == current.*;
+                const ibg = if (isel) self.style.accent else self.style.panel_bg;
+                fillRoundedRect(self.fb, area.x, iy, total_w, bh, 0, ibg);
+                drawRectBorder(self.fb, area.x, iy, total_w, bh, self.style.border);
+                drawTextAt(self.fb, items[ci], area.x + 6, iy + 4, if (isel) self.style.button_text else self.style.text, 8);
+            }
+            const total_h = bh * @as(u32, @intCast(items.len));
+            drawRectBorder(self.fb, area.x, area.y + bh, total_w, total_h, self.style.border);
+        }
+
+        if (!is_open and state.bool_val) {
+            state.bool_val = false;
+        }
+
+        return false;
+    }
+
     pub fn separator(self: *Gui) void {
         const id = self.nextId();
         _ = id;
         const area = self.allocSpace(10, 6);
         const cy = area.y + 2;
         const cw = if (self.layout_depth > 0) self.layout_stack[self.layout_depth - 1].w else @as(u32, @intCast(self.fb.width));
-        fillRect(self.fb, area.x, cy, cw, 2, self.style.separator);
+        fillRoundedRect(self.fb, area.x, cy, cw, 2, 1, self.style.separator);
     }
 
     pub fn sameLine(self: *Gui, spacing: i32) void {
@@ -945,7 +1098,7 @@ pub const Gui = struct {
                 .x = pos.x, .y = pos.y, .w = 0, .h = 0,
                 .cursor_x = pos.x, .cursor_y = pos.y,
                 .max_x = pos.x, .max_y = pos.y,
-                .mode = .vertical, .spacing = 4, .indent = 0,
+                .mode = .vertical, .spacing = @as(i32, self.style.spacing), .indent = 0,
             };
             self.layout_depth += 1;
         }
@@ -969,7 +1122,7 @@ pub const Gui = struct {
                 .x = pos.x, .y = pos.y, .w = 0, .h = 0,
                 .cursor_x = pos.x, .cursor_y = pos.y,
                 .max_x = pos.x, .max_y = pos.y,
-                .mode = .horizontal, .spacing = 4, .indent = 0,
+                .mode = .horizontal, .spacing = @as(i32, self.style.spacing), .indent = 0,
             };
             self.layout_depth += 1;
         }
@@ -1027,13 +1180,15 @@ pub const Gui = struct {
             self.window_depth += 1;
         }
 
-        fillRect(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), self.style.title_bg);
+        const wr = self.style.window_rounding;
+        drawShadow(self.fb, win_x, win_y, win_w, win_h, self.style.shadow, wr);
+        fillRoundedRect(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), wr, self.style.title_bg);
         drawRectBorder(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), self.style.border);
         drawTextAt(self.fb, title, win_x + 8, win_y + 6, self.style.title_text, 8);
 
         const client_y = win_y + title_h;
         const client_h = win_h - @as(u32, @intCast(title_h));
-        fillRect(self.fb, win_x, client_y, win_w, client_h, self.style.panel_bg);
+        fillRoundedRect(self.fb, win_x, client_y, win_w, client_h, wr, self.style.panel_bg);
         drawRectBorder(self.fb, win_x, client_y, win_w, client_h, self.style.border);
 
         if (resizable) {
@@ -1063,7 +1218,7 @@ pub const Gui = struct {
                 .x = win_x + 8, .y = client_y + 4, .w = win_w - 16, .h = client_h - 8,
                 .cursor_x = win_x + 8, .cursor_y = client_y + 4,
                 .max_x = win_x + 8, .max_y = client_y + 4,
-                .mode = .vertical, .spacing = 4, .indent = 0,
+                .mode = .vertical, .spacing = @as(i32, self.style.spacing), .indent = 0,
             };
             self.layout_depth += 1;
         }
@@ -1122,6 +1277,62 @@ fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) vo
         while (xi < x2) : (xi += 1) {
             fb.pixels[row + xi] = color;
         }
+    }
+}
+
+fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, color: u32) void {
+    if (r == 0 or w < @as(u32, @intCast(r * 2 + 2)) or h < @as(u32, @intCast(r * 2 + 2))) {
+        fillRect(fb, x, y, w, h, color);
+        return;
+    }
+    const rr = @as(u32, r);
+    const x1: u32 = if (x < 0) 0 else @intCast(x);
+    const y1: u32 = if (y < 0) 0 else @intCast(y);
+    const x2_: u32 = @min(x1 + w, fb.width);
+    const y2_: u32 = @min(y1 + h, fb.height);
+    var yi = y1;
+    while (yi < y2_) : (yi += 1) {
+        const row = @as(usize, yi) * fb.stride;
+        const local_y = yi - y1;
+        var xi = x1;
+        while (xi < x2_) : (xi += 1) {
+            const local_x = xi - x1;
+            var in_corner = false;
+            if (local_x < rr and local_y < rr) {
+                const dx = rr - local_x - 1;
+                const dy = rr - local_y - 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x >= w - rr and local_y < rr) {
+                const dx = local_x - (w - rr) + 1;
+                const dy = rr - local_y - 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x < rr and local_y >= h - rr) {
+                const dx = rr - local_x - 1;
+                const dy = local_y - (h - rr) + 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x >= w - rr and local_y >= h - rr) {
+                const dx = local_x - (w - rr) + 1;
+                const dy = local_y - (h - rr) + 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            }
+            if (!in_corner) {
+                fb.pixels[row + xi] = color;
+            }
+        }
+    }
+}
+
+fn drawShadow(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, intensity: u8, r: u8) void {
+    if (intensity == 0) return;
+    const steps = @as(u32, @min(@as(u32, intensity) / 20 + 1, 4));
+    var s: u32 = 1;
+    while (s <= steps) : (s += 1) {
+        const alpha = intensity / (s * 2 + 1);
+        if (alpha < 5) continue;
+        const shadow_color: u32 = 0xFF000000 | (@as(u32, alpha) << 16) | (@as(u32, alpha) << 8) | @as(u32, alpha);
+        const off = @as(i32, @intCast(s));
+        const sr = if (r > s) r - @as(u8, @intCast(s)) else 0;
+        fillRoundedRect(fb, x + off, y + off, w, h, sr, shadow_color);
     }
 }
 

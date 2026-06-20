@@ -58,6 +58,7 @@ pub fn main() void {
     var text_buf: [256]u8 = [_]u8{0} ** 256;
     text_buf[0] = 'h'; text_buf[1] = 'e'; text_buf[2] = 'l'; text_buf[3] = 'l'; text_buf[4] = 'o';
     var click_count: u32 = 0;
+    var combo_idx: usize = 0;
 
     const styles = allStyles();
     var style_idx: usize = 0;
@@ -174,6 +175,17 @@ pub fn main() void {
         if (gui.collapsible("Text Input", &collapsible_open)) {
             gui.label("  Type something:");
             _ = gui.textInput("Input", text_buf[0..]);
+        }
+
+        gui.separator();
+        const combo_items = [_][]const u8{ "Option A", "Option B", "Option C", "Option D" };
+        if (gui.comboBox("Combo", combo_items[0..], &combo_idx)) {
+            var buf2: [64]u8 = undefined;
+            var len2: usize = 0;
+            const sel = "Selected: ";
+            for (sel) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
+            for (combo_items[combo_idx]) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
+            gui.label(buf2[0..len2]);
         }
 
         gui.endWindow();

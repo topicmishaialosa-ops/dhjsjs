@@ -449,7 +449,8 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
     const panel_w: u32 = W - 20;
     const panel_h: u32 = H - 70;
 
-    fillRect(fb, panel_x, panel_y, panel_w, panel_h, gui.style.panel_bg);
+    const r = gui.style.rounding;
+    fillRoundedRect(fb, panel_x, panel_y, panel_w, panel_h, r, gui.style.panel_bg);
     drawRectBorder(fb, panel_x, panel_y, panel_w, panel_h, gui.style.border);
 
     drawText(fb, "Settings", panel_x + 10, panel_y + 8, gui.style.text, 16);
@@ -482,10 +483,10 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
         drawText(fb, item.label, panel_x + 28, cy + 4, gui.style.text, 8);
 
         const check_x = panel_x + 160;
-        fillRect(fb, check_x, cy + 2, 16, 16, gui.style.check_bg);
+        fillRoundedRect(fb, check_x, cy + 2, 16, 16, 3, gui.style.check_bg);
         drawRectBorder(fb, check_x, cy + 2, 16, 16, gui.style.border);
         if (item.value.*) {
-            drawText(fb, "X", check_x + 3, cy + 3, gui.style.check_mark, 8);
+            fillRoundedRect(fb, check_x + 3, cy + 5, 10, 10, 2, gui.style.check_mark);
         }
 
         if (is_hovered and clicked) {
@@ -496,6 +497,55 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
     }
 
     cy += 10;
+    drawText(fb, "Theme:", panel_x + 20, cy, gui.style.text, 8);
+
+    const themes = [_]*const gui_mod.Style{
+        &gui_mod.style_dark, &gui_mod.style_light, &gui_mod.style_dracula,
+        &gui_mod.style_nord, &gui_mod.style_monokai, &gui_mod.style_one_dark,
+        &gui_mod.style_catppuccin, &gui_mod.style_tokyo_night, &gui_mod.style_gruvbox_dark,
+        &gui_mod.style_rose_pine, &gui_mod.style_forest, &gui_mod.style_ocean,
+        &gui_mod.style_sunset, &gui_mod.style_candy, &gui_mod.style_retro_terminal,
+    };
+    const theme_names = [_][]const u8{
+        "Dark", "Light", "Dracula", "Nord", "Monokai", "One Dark",
+        "Catppuccin", "Tokyo Night", "Gruvbox", "Rose Pine", "Forest", "Ocean",
+        "Sunset", "Candy", "Retro",
+    };
+
+    cy += 16;
+    var ti: usize = 0;
+    var tx = panel_x + 20;
+    while (ti < themes.len) : (ti += 1) {
+        const tw: u32 = 80;
+        const th: u32 = 18;
+        const thovered = mx >= tx and mx < tx + @as(i32, @intCast(tw)) and
+            my >= cy and my < cy + @as(i32, @intCast(th));
+        const tbg = if (thovered) themes[ti].button_hover else themes[ti].button_bg;
+        fillRoundedRect(fb, tx, cy, tw, th, 3, tbg);
+        drawRectBorder(fb, tx, cy, tw, th, themes[ti].border);
+
+        const preview_colors = [_]u32{ themes[ti].accent, themes[ti].slider_thumb, themes[ti].check_mark };
+        var pi: usize = 0;
+        var px = tx + tw - 20;
+        while (pi < 3) : (pi += 1) {
+            fillRect(fb, px, cy + 3, 5, th - 6, preview_colors[pi]);
+            px += 6;
+        }
+
+        drawText(fb, theme_names[ti], tx + 3, cy + 3, themes[ti].text, 8);
+
+        if (thovered and clicked) {
+            gui.setStyle(themes[ti].*);
+        }
+
+        tx += @as(i32, @intCast(tw)) + 6;
+        if (tx + @as(i32, @intCast(tw)) > panel_x + @as(i32, @intCast(panel_w))) {
+            tx = panel_x + 20;
+            cy += @as(i32, @intCast(th)) + 4;
+        }
+    }
+
+    cy += 40;
     drawText(fb, "Supported Formats:", panel_x + 20, cy, gui.style.text, 8);
     cy += 16;
     drawText(fb, "WAV  - Uncompressed PCM audio", panel_x + 30, cy, gui.style.text_dim, 8);
@@ -507,11 +557,8 @@ fn drawSettingsView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui,
     drawText(fb, "FLAC - Free Lossless Audio", panel_x + 30, cy, gui.style.text_dim, 8);
     cy += 14;
     drawText(fb, "AIFF - Audio Interchange File", panel_x + 30, cy, gui.style.text_dim, 8);
-
     cy += 30;
-    drawText(fb, "Audio Output: /dev/dsp (OSS)", panel_x + 20, cy, gui.style.text_dim, 8);
-    cy += 14;
-    drawText(fb, "Zero dependencies - all decoders written from scratch", panel_x + 20, cy, gui.style.accent, 8);
+    drawText(fb, "Style fields: bg, panel_bg, button_bg, accent, text, border, rounding, shadow", panel_x + 20, cy, gui.style.accent, 8);
 }
 
 fn simpleSin(x: f32) f32 {
@@ -536,6 +583,46 @@ fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) vo
         var xi = x1;
         while (xi < x2) : (xi += 1) {
             fb.pixels[row + xi] = color;
+        }
+    }
+}
+
+fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, color: u32) void {
+    if (r == 0 or w < @as(u32, @intCast(r * 2 + 2)) or h < @as(u32, @intCast(r * 2 + 2))) {
+        fillRect(fb, x, y, w, h, color);
+        return;
+    }
+    const rr = @as(u32, r);
+    const x1: u32 = if (x < 0) 0 else @intCast(x);
+    const y1: u32 = if (y < 0) 0 else @intCast(y);
+    const x2_: u32 = @min(x1 + w, fb.width);
+    const y2_: u32 = @min(y1 + h, fb.height);
+    var yi = y1;
+    while (yi < y2_) : (yi += 1) {
+        const row = @as(usize, yi) * fb.stride;
+        const local_y = yi - y1;
+        var xi = x1;
+        while (xi < x2_) : (xi += 1) {
+            const local_x = xi - x1;
+            var in_corner = false;
+            if (local_x < rr and local_y < rr) {
+                const dx = rr - local_x - 1;
+                const dy = rr - local_y - 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x >= w - rr and local_y < rr) {
+                const dx = local_x - (w - rr) + 1;
+                const dy = rr - local_y - 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x < rr and local_y >= h - rr) {
+                const dx = rr - local_x - 1;
+                const dy = local_y - (h - rr) + 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            } else if (local_x >= w - rr and local_y >= h - rr) {
+                const dx = local_x - (w - rr) + 1;
+                const dy = local_y - (h - rr) + 1;
+                if (dx * dx + dy * dy > rr * rr) in_corner = true;
+            }
+            if (!in_corner) fb.pixels[row + xi] = color;
         }
     }
 }
