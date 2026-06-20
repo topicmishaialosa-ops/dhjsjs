@@ -268,7 +268,7 @@ fn drawPlayerView(fb: *gfx.Framebuffer, gui: *gui_mod.Gui, player: *player_mod.P
     const btn_y = panel_y + 110;
     const btn_h: u32 = 36;
     const btn_w: u32 = 60;
-    const center_x = panel_x + @as(i32, @intCast(panel_w)) / 2;
+    const center_x = panel_x + @divTrunc(@as(i32, @intCast(panel_w)), 2);
 
     const prev_x = center_x - @as(i32, @intCast(btn_w * 2 + 20));
     const play_x = center_x - @as(i32, @intCast(@divTrunc(btn_w, 2)));

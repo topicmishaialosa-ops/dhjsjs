@@ -1,12 +1,4 @@
-const std = @import("std");
-const builtin = @import("builtin");
 const bridge = @import("android_bridge.zig");
-
-comptime {
-    if (builtin.cpu.arch != .aarch64) {
-        @compileError("android_gui.zig requires aarch64 target");
-    }
-}
 
 pub const MAX_EVENTS: usize = 16;
 

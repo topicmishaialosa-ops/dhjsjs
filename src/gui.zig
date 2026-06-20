@@ -719,7 +719,7 @@ pub const Gui = struct {
         const tw = @as(i32, @intCast(label_text.len * 8));
         drawTextAt(self.fb, label_text,
             area.x + @divTrunc(@as(i32, @intCast(area.w)), 2) - @divTrunc(tw, 2),
-            area.y + @as(i32, @intCast(bh)) / 2 - 4,
+            area.y + @divTrunc(@as(i32, @intCast(bh)), 2) - 4,
             self.style.button_text, 8);
 
         return clicked;
@@ -874,7 +874,7 @@ pub const Gui = struct {
         const track_h: u32 = 6;
         const thumb_r: u32 = 6;
         const track_x = area.x;
-        const track_y = area.y + @as(i32, @intCast(sh - track_h)) / 2;
+        const track_y = area.y + @divTrunc(@as(i32, @intCast(sh - track_h)), 2);
         const track_w = area.w;
 
         const range = max - min;

@@ -181,7 +181,7 @@ pub fn drawRadioButton(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, _gr
     }
 
     const cx = x + 8;
-    const cy = y + @as(i32, @intCast(h)) / 2;
+    const cy = y + @divTrunc(@as(i32, @intCast(h)), 2);
     const r: i32 = 6;
 
     drawCircle(fb, cx, cy, r, if (is_hovered) style.accent else style.border);
