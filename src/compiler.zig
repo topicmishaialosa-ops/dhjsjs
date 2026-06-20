@@ -1573,6 +1573,154 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.movRImm64(cg.RAX, 0);
         return;
     }
+    if (eq(name, "android_width")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 36);
+        return;
+    }
+    if (eq(name, "android_height")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 40);
+        return;
+    }
+    if (eq(name, "android_should_finish")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 32);
+        return;
+    }
+    if (eq(name, "android_has_focus")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 28);
+        return;
+    }
+    if (eq(name, "android_touch_x")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 56);
+        return;
+    }
+    if (eq(name, "android_touch_y")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 60);
+        return;
+    }
+    if (eq(name, "android_touch_down")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 64);
+        return;
+    }
+    if (eq(name, "android_fb_ptr")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 48);
+        return;
+    }
+    if (eq(name, "android_stride")) {
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RAX, cg.RDI, 44);
+        return;
+    }
+    if (eq(name, "android_pixel")) {
+        var aargs: [4]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 4;
+        var ac: usize = 0;
+        var achild = n.first_child;
+        while (achild != parser_mod.NO_NODE and ac < 4) {
+            aargs[ac] = achild;
+            achild = pool[@as(usize, @intCast(achild))].next_sibling;
+            ac += 1;
+        }
+        if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (aargs[1] != parser_mod.NO_NODE) { compileExprNode(aargs[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (aargs[2] != parser_mod.NO_NODE) { compileExprNode(aargs[2], pool, cb, vars, vc, errs); } else { cb.movRImm64(cg.RAX, 0xFFFFFFFF); }
+        cb.popR(cg.RCX);
+        cb.popR(cg.R8);
+        // read fb_pixels ptr from cmd+48, stride from cmd+44
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.R9, cg.RDI, 44); // stride
+        cb.movRMem64(cg.RDI, cg.RDI, 48); // fb_pixels ptr
+        cb.imulRR(cg.R8, cg.R9);
+        cb.addRR(cg.R8, cg.RCX);
+        cb.shlRImm8(cg.R8, 2);
+        cb.addRR(cg.RDI, cg.R8);
+        cb.movMemR64(cg.RDI, 0, cg.RAX);
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "android_rect")) {
+        var raargs: [5]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 5;
+        var rac: usize = 0;
+        var rachild = n.first_child;
+        while (rachild != parser_mod.NO_NODE and rac < 5) {
+            raargs[rac] = rachild;
+            rachild = pool[@as(usize, @intCast(rachild))].next_sibling;
+            rac += 1;
+        }
+        if (raargs[0] != parser_mod.NO_NODE) { compileExprNode(raargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // x
+        if (raargs[1] != parser_mod.NO_NODE) { compileExprNode(raargs[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // y
+        if (raargs[2] != parser_mod.NO_NODE) { compileExprNode(raargs[2], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // w
+        if (raargs[3] != parser_mod.NO_NODE) { compileExprNode(raargs[3], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // h
+        if (raargs[4] != parser_mod.NO_NODE) { compileExprNode(raargs[4], pool, cb, vars, vc, errs); } else { cb.movRImm64(cg.RAX, 0xFFFFFFFF); }
+        cb.pushR(cg.RAX); // color
+
+        // Read fb_pixels ptr and stride from fixed addresses
+        cb.movRImm64(cg.RDI, 0x200100);
+        cb.movRMem64(cg.RDI, cg.RDI, 48); // RDI = fb_pixels ptr
+        cb.movRImm64(cg.RSI, 0x200100);
+        cb.movRMem64(cg.RSI, cg.RSI, 44); // RSI = stride
+
+        // Pop args: color, h, w, y, x
+        cb.popR(cg.R15); // color
+        cb.popR(cg.R14); // h
+        cb.popR(cg.R13); // w
+        cb.popR(cg.R12); // y
+        cb.popR(cg.R11); // x
+
+        // R10 = dy = 0
+        cb.xorRR(cg.R10, cg.R10);
+        const rect_y_loop = cb.pos;
+        cb.cmpRR(cg.R10, cg.R14);
+        const rect_y_done = cb.pos;
+        cb.jgeRel32(0);
+
+        // R8 = line_start = pixels + (y + dy) * stride
+        cb.movRR(cg.R8, cg.R12);
+        cb.addRR(cg.R8, cg.R10);
+        cb.imulRR(cg.R8, cg.RSI);
+        cb.addRR(cg.R8, cg.RDI);
+
+        // R9 = dx = 0
+        cb.xorRR(cg.R9, cg.R9);
+        const rect_x_loop = cb.pos;
+        cb.cmpRR(cg.R9, cg.R13);
+        const rect_x_done = cb.pos;
+        cb.jgeRel32(0);
+
+        // pixel at (x + dx)
+        cb.movRR(cg.RAX, cg.R11);
+        cb.addRR(cg.RAX, cg.R9);
+        cb.shlRImm8(cg.RAX, 2);
+        cb.addRR(cg.RAX, cg.R8);
+        cb.movMemR64(cg.RAX, 0, cg.R15);
+
+        cb.addRImm32(cg.R9, 1);
+        cb.jmpRel32(@as(i32, @intCast(rect_x_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+        const rect_x_end = cb.pos;
+        patch32(cb, rect_x_done + 2, @as(i32, @intCast(rect_x_end)) - @as(i32, @intCast(rect_x_done + 6)));
+
+        cb.addRImm32(cg.R10, 1);
+        cb.jmpRel32(@as(i32, @intCast(rect_y_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+        const rect_y_end = cb.pos;
+        patch32(cb, rect_y_done + 2, @as(i32, @intCast(rect_y_end)) - @as(i32, @intCast(rect_y_done + 6)));
+
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
     cb.movRImm64(cg.RAX, 0);
 }
 

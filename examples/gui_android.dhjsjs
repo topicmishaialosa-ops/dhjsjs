@@ -1,0 +1,128 @@
+fn main() int {
+    hui style_idx = 0;
+    hui show_menu = 0;
+    hui prev_touch = 0;
+    hui frame = 0;
+    hui btn_press = 0;
+
+    hui style_bg = 0xFF1A1A2E;
+    hui style_surface = 0xFF16213E;
+    hui style_primary = 0xFF6750A4;
+    hui style_accent = 0xFF0F3460;
+    hui style_text = 0xFFFFFFFF;
+    hui style_error = 0xFFB3261E;
+
+    while android_should_finish() == 0 {
+        hui W = android_width();
+        hui H = android_height();
+        hui tx = android_touch_x();
+        hui ty = android_touch_y();
+        hui td = android_touch_down();
+
+        android_rect(0, 0, W, H, style_bg);
+
+        hui status_h = 25;
+        hui topbar_h = 48;
+        hui navbar_h = 48;
+        hui content_top = status_h + topbar_h;
+        hui content_h = H - content_top - navbar_h;
+
+        android_rect(0, 0, W, status_h, style_primary);
+        android_rect(0, status_h, W, topbar_h, style_surface);
+        android_rect(10, status_h + 8, 120, 16, style_primary);
+        android_rect(12, status_h + 12, 116, 8, style_primary);
+        android_rect(W - 44, status_h + 8, 36, 32, 0);
+
+        android_rect(0, H - navbar_h, W, navbar_h, style_surface);
+        hui tab_w = W / 4;
+        android_rect(tab_w * 0 + 10, H - navbar_h + 6, tab_w - 20, 4, style_primary);
+        android_rect(tab_w * 1 + 10, H - navbar_h + 6, tab_w - 20, 4, style_accent);
+        android_rect(tab_w * 2 + 10, H - navbar_h + 6, tab_w - 20, 4, style_accent);
+        android_rect(tab_w * 3 + 10, H - navbar_h + 6, tab_w - 20, 4, style_accent);
+        android_rect(tab_w * 0 + tab_w / 2 - 4, H - navbar_h + 16, 8, 8, style_primary);
+        android_rect(tab_w * 1 + tab_w / 2 - 4, H - navbar_h + 16, 8, 8, style_accent);
+        android_rect(tab_w * 2 + tab_w / 2 - 4, H - navbar_h + 16, 8, 8, style_accent);
+        android_rect(tab_w * 3 + tab_w / 2 - 4, H - navbar_h + 16, 8, 8, style_accent);
+
+        hui card_w = W / 2 - 20;
+        hui card_h = content_h / 2 - 16;
+        hui cx = 10;
+        hui cy = content_top + 8;
+
+        android_rect(cx + 4, cy + 4, card_w - 8, 44, style_primary);
+        android_rect(cx + 12, cy + 18, 80, 4, style_primary);
+        android_rect(cx + 12, cy + 28, 40, 4, style_primary);
+        android_rect(cx + 4, cy + 56, card_w - 8, card_h - 68, style_primary);
+        android_rect(cx + 12, cy + 68, card_w - 24, 4, style_surface);
+        android_rect(cx + 12, cy + 78, card_w - 24, 4, style_surface);
+        android_rect(cx + 12, cy + 88, card_w - 24, 4, style_surface);
+
+        hui cx2 = cx + card_w + 20;
+        android_rect(cx2 + 4, cy + 4, card_w - 8, 44, style_accent);
+        android_rect(cx2 + 12, cy + 18, 80, 4, style_accent);
+        android_rect(cx2 + 12, cy + 28, 40, 4, style_accent);
+        android_rect(cx2 + 4, cy + 56, card_w - 8, card_h - 68, style_accent);
+        android_rect(cx2 + 12, cy + 68, card_w - 24, 4, style_surface);
+        android_rect(cx2 + 12, cy + 78, card_w - 24, 4, style_surface);
+        android_rect(cx2 + 12, cy + 88, card_w - 24, 4, style_surface);
+
+        hui sw = 120;
+        hui sh = 36;
+        hui sx = W / 2 - sw / 2;
+        hui sy = cy + card_h * 2 + 32;
+
+        if btn_press > 0 {
+            btn_press = btn_press - 1;
+        }
+
+        hui btn_color = style_primary;
+        if btn_press > 0 { btn_color = style_primary - 0x202020; }
+        android_rect(sx, sy, sw, sh, btn_color);
+        android_rect(sx + sw / 2 - 16, sy + 10, 32, 16, style_text);
+        android_rect(sx + sw / 2 - 8, sy + 12, 16, 4, style_text);
+
+        if td == 1 && prev_touch == 0 {
+            if ty > sy && ty < sy + sh && tx > sx && tx < sx + sw {
+                style_idx = style_idx + 1;
+                if style_idx >= 4 { style_idx = 0; }
+                btn_press = 8;
+                if style_idx == 0 {
+                    style_bg = 0xFF1A1A2E;
+                    style_surface = 0xFF16213E;
+                    style_primary = 0xFF6750A4;
+                    style_accent = 0xFF0F3460;
+                    style_text = 0xFFFFFFFF;
+                    style_error = 0xFFB3261E;
+                }
+                if style_idx == 1 {
+                    style_bg = 0xFF0D1117;
+                    style_surface = 0xFF161B22;
+                    style_primary = 0xFF58A6FF;
+                    style_accent = 0xFF238636;
+                    style_text = 0xFFC9D1D9;
+                    style_error = 0xFFF85149;
+                }
+                if style_idx == 2 {
+                    style_bg = 0xFFFFFBFE;
+                    style_surface = 0xFFFFFBFE;
+                    style_primary = 0xFF6750A4;
+                    style_accent = 0xFF4F378B;
+                    style_text = 0xFF1C1B1F;
+                    style_error = 0xFFB3261E;
+                }
+                if style_idx == 3 {
+                    style_bg = 0xFF121212;
+                    style_surface = 0xFF181818;
+                    style_primary = 0xFF1DB954;
+                    style_accent = 0xFF1ED760;
+                    style_text = 0xFFFFFFFF;
+                    style_error = 0xFFE91429;
+                }
+            }
+        }
+
+        prev_touch = td;
+        frame = frame + 1;
+    }
+    return 0;
+}
