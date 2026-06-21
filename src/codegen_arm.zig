@@ -14,6 +14,19 @@ pub const X12: u8 = 12;
 pub const X13: u8 = 13;
 pub const X14: u8 = 14;
 pub const X15: u8 = 15;
+pub const X16: u8 = 16;
+pub const X17: u8 = 17;
+pub const X18: u8 = 18;
+pub const X19: u8 = 19;
+pub const X20: u8 = 20;
+pub const X21: u8 = 21;
+pub const X22: u8 = 22;
+pub const X23: u8 = 23;
+pub const X24: u8 = 24;
+pub const X25: u8 = 25;
+pub const X26: u8 = 26;
+pub const X27: u8 = 27;
+pub const X28: u8 = 28;
 pub const X30: u8 = 30;
 pub const FP: u8 = 29;
 pub const ZR: u8 = 31;
@@ -155,6 +168,10 @@ pub const CodeBuffer = struct {
         self.dword(0x9A200000 | (@as(u32, rm) << 16) | (1 << 12) | (@as(u32, rn) << 5) | rd);
     }
 
+    pub fn lsrImm(self: *CodeBuffer, rd: u8, rn: u8, imm: u8) void {
+        self.dword(0xD340FC00 | (@as(u32, imm & 63) << 16) | (@as(u32, rn) << 5) | rd);
+    }
+
     pub fn asr(self: *CodeBuffer, rd: u8, rn: u8, rm: u8) void {
         self.dword(0x9A600000 | (@as(u32, rm) << 16) | (@as(u32, rn) << 5) | rd);
     }
@@ -218,6 +235,16 @@ pub const CodeBuffer = struct {
     pub fn ldr32(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {
         const imm12: u32 = @as(u32, @bitCast(off >> 2)) & 0xFFF;
         self.dword(0xB9400000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
+    }
+
+    pub fn str8(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {
+        const imm12: u32 = @as(u32, @intCast(off)) & 0xFFF;
+        self.dword(0x39000000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
+    }
+
+    pub fn ldr8(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {
+        const imm12: u32 = @as(u32, @intCast(off)) & 0xFFF;
+        self.dword(0x39400000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
     }
 
     pub fn str16(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {

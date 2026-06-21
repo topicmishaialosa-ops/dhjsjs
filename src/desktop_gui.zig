@@ -99,6 +99,7 @@ pub fn main() void {
     var mouse_down = false;
     var mouse_clicked = false;
     var mouse_released = false;
+    var scroll_delta: i32 = 0;
 
     var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
@@ -114,6 +115,7 @@ pub fn main() void {
     while (running) {
         mouse_clicked = false;
         mouse_released = false;
+        scroll_delta = 0;
 
         while (disp.pollEvent()) |event| {
             switch (event) {
@@ -130,13 +132,14 @@ pub fn main() void {
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
+                .scroll => |s| { scroll_delta += s.dy; },
             }
         }
 
         const input = gui_mod.InputState{
             .mouse_x = mouse_x, .mouse_y = mouse_y,
             .mouse_down = mouse_down, .mouse_clicked = mouse_clicked,
-            .mouse_released = mouse_released, .scroll = 0,
+            .mouse_released = mouse_released, .scroll = scroll_delta,
             .keys = key_state,
             .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
             .text_input = [_]u8{0} ** 16, .text_len = 0,

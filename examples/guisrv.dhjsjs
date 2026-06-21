@@ -1,0 +1,12 @@
+fn main() int {
+    hui fd = guiServer();
+    hui hi = fd >> 32;
+    hui lo = fd & 0xFFFFFFFF;
+    if (hi == 0) { print("ERROR: hi=0\n"); }
+    uebok { print("hi not zero\n"); }
+    if (lo == 0) { print("ERROR: lo=0\n"); }
+    uebok { print("lo not zero\n"); }
+    if (fd == 0) { print("ERROR: fd=0\n"); }
+    uebok { print("fd not zero\n"); }
+    return 0;
+}

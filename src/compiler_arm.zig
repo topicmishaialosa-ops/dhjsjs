@@ -387,6 +387,143 @@ fn popX0(cb: *cg.CodeBuffer) void {
     cb.addi(31, 31, 8);
 }
 
+fn emitStackSub(cb: *cg.CodeBuffer, amount: u32) void {
+    var rem = amount;
+    while (rem > 0) {
+        const chunk: u16 = if (rem > 2048) 2048 else @as(u16, @intCast(rem));
+        cb.subi(31, 31, chunk);
+        rem -= chunk;
+    }
+}
+
+fn emitStackAdd(cb: *cg.CodeBuffer, amount: u32) void {
+    var rem = amount;
+    while (rem > 0) {
+        const chunk: u16 = if (rem > 2048) 2048 else @as(u16, @intCast(rem));
+        cb.addi(31, 31, chunk);
+        rem -= chunk;
+    }
+}
+
+fn emitAddrFromSp(cb: *cg.CodeBuffer, dst: u8, off: u32) void {
+    cb.addi(dst, 31, 0);
+    var rem = off;
+    while (rem > 0) {
+        const chunk: u16 = if (rem > 2048) 2048 else @as(u16, @intCast(rem));
+        cb.addi(dst, dst, chunk);
+        rem -= chunk;
+    }
+}
+
+fn emitWriteLit(cb: *cg.CodeBuffer, dst: u8, s: []const u8) void {
+    for (s) |c| {
+        cb.movRImm64(cg.X0, c);
+        cb.str8(cg.X0, dst, 0);
+        cb.addi(dst, dst, 1);
+    }
+}
+
+fn emitCopyCString(cb: *cg.CodeBuffer, dst: u8, src: u8) void {
+    const loop_pos = cb.len;
+    cb.ldr8(cg.X0, src, 0);
+    const done_pos = cb.len;
+    cb.cbz(cg.X0);
+    cb.str8(cg.X0, dst, 0);
+    cb.addi(dst, dst, 1);
+    cb.addi(src, src, 1);
+    const jump_pos = cb.len;
+    cb.branch();
+    cb.patchB(jump_pos, loop_pos);
+    cb.patchCBZ(done_pos, cb.len);
+}
+
+fn emitCStringLen(cb: *cg.CodeBuffer, src: u8, len_reg: u8) void {
+    cb.mov(len_reg, cg.ZR);
+    cb.cmp(src, cg.ZR);
+    const null_pos = cb.len;
+    cb.beq();
+    cb.mov(cg.X14, src);
+    const loop_pos = cb.len;
+    cb.ldr8(cg.X0, cg.X14, 0);
+    const done_pos = cb.len;
+    cb.cbz(cg.X0);
+    cb.addi(cg.X14, cg.X14, 1);
+    cb.addi(len_reg, len_reg, 1);
+    const jump_pos = cb.len;
+    cb.branch();
+    cb.patchB(jump_pos, loop_pos);
+    cb.patchCBZ(done_pos, cb.len);
+    cb.patchBCond(null_pos, cb.len);
+}
+
+fn emitWriteUnsignedDecimal(cb: *cg.CodeBuffer, value_reg: u8, dst: u8) void {
+    cb.mov(cg.X14, value_reg);
+    cb.movRImm64(cg.X15, 10);
+    cb.mov(cg.X16, cg.ZR);
+
+    const div_loop = cb.len;
+    cb.sdiv(cg.X17, cg.X14, cg.X15);
+    cb.mul(cg.X18, cg.X17, cg.X15);
+    cb.sub(cg.X18, cg.X14, cg.X18);
+    cb.movRImm64(cg.X0, '0');
+    cb.add(cg.X0, cg.X0, cg.X18);
+    cb.addi(cg.X18, 31, 0);
+    cb.add(cg.X18, cg.X18, cg.X16);
+    cb.str8(cg.X0, cg.X18, 0);
+    cb.addi(cg.X16, cg.X16, 1);
+    cb.mov(cg.X14, cg.X17);
+    const more_digits = cb.len;
+    cb.cbnz(cg.X14);
+    cb.patchCBNZ(more_digits, div_loop);
+
+    const out_loop = cb.len;
+    cb.subi(cg.X16, cg.X16, 1);
+    cb.addi(cg.X18, 31, 0);
+    cb.add(cg.X18, cg.X18, cg.X16);
+    cb.ldr8(cg.X0, cg.X18, 0);
+    cb.str8(cg.X0, dst, 0);
+    cb.addi(dst, dst, 1);
+    const out_more = cb.len;
+    cb.cbnz(cg.X16);
+    cb.patchCBNZ(out_more, out_loop);
+}
+
+fn emitWriteIpHost(cb: *cg.CodeBuffer, ip_reg: u8, dst: u8) void {
+    var shift: u8 = 0;
+    var part: usize = 0;
+    while (part < 4) : (part += 1) {
+        cb.lsrImm(cg.X26, ip_reg, shift);
+        cb.movRImm64(cg.X27, 255);
+        cb.and_(cg.X26, cg.X26, cg.X27);
+        emitWriteUnsignedDecimal(cb, cg.X26, dst);
+        if (part < 3) emitWriteLit(cb, dst, ".");
+        shift += 8;
+    }
+}
+
+fn compileArmArgToReg(
+    idx: parser_mod.NodeIdx,
+    dst: u8,
+    default_value: i64,
+    pool: *[parser_mod.MAX_NODES]parser_mod.AstNode,
+    cb: *cg.CodeBuffer,
+    vars: *[MAX_VARS]Var,
+    vc: *usize,
+    frame: i32,
+) void {
+    if (idx == parser_mod.NO_NODE) {
+        cb.movRImm64(dst, @as(u64, @bitCast(default_value)));
+        return;
+    }
+    const n = &pool[@as(usize, @intCast(idx))];
+    if (n.kind == .int_lit) {
+        cb.movRImm64(dst, @as(u64, @bitCast(strToInt(n.val_start[0..n.val_len]))));
+        return;
+    }
+    compileExprNode(idx, pool, cb, vars, vc, frame);
+    cb.mov(dst, cg.X0);
+}
+
 fn compileBinaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, frame: i32) void {
     const op = n.name_start[0..n.name_len];
     const left = n.first_child;
@@ -653,7 +790,218 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.svc(0);
         return;
     }
-    cb.mov(cg.X0, cg.ZR);
+    if (eq(name, "android_http_get") or eq(name, "android_http_post")) {
+        const is_post = eq(name, "android_http_post");
+        const scratch_off: u32 = 0;
+        const request_off: u32 = 64;
+        const response_off: u32 = request_off + 4096;
+        const total_stack: u32 = response_off + 8192;
+        _ = scratch_off;
+
+        var args_list: [4]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 4;
+        var arg_i: usize = 0;
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and arg_i < 4) {
+            args_list[arg_i] = ch;
+            arg_i += 1;
+            ch = pool[@as(usize, @intCast(ch))].next_sibling;
+        }
+
+        compileArmArgToReg(args_list[0], cg.X21, 0, pool, cb, vars, vc, frame); // ip, little-endian u32: 0x0100007F -> 127.0.0.1
+        compileArmArgToReg(args_list[1], cg.X22, 80, pool, cb, vars, vc, frame); // port
+        compileArmArgToReg(args_list[2], cg.X23, 0, pool, cb, vars, vc, frame); // path pointer
+        if (is_post) compileArmArgToReg(args_list[3], cg.X24, 0, pool, cb, vars, vc, frame) else cb.mov(cg.X24, cg.ZR);
+        if (is_post) emitCStringLen(cb, cg.X24, cg.X25) else cb.mov(cg.X25, cg.ZR);
+
+        emitStackSub(cb, total_stack);
+
+        cb.movRImm64(cg.X0, 2);
+        cb.str16(cg.X0, 31, 0);
+        cb.mov(cg.X26, cg.X22);
+        cb.movRImm64(cg.X27, 255);
+        cb.and_(cg.X0, cg.X26, cg.X27);
+        cb.movRImm64(cg.X28, 256);
+        cb.mul(cg.X0, cg.X0, cg.X28);
+        cb.lsrImm(cg.X1, cg.X26, 8);
+        cb.and_(cg.X1, cg.X1, cg.X27);
+        cb.orr(cg.X0, cg.X0, cg.X1);
+        cb.str16(cg.X0, 31, 2);
+        cb.str32(cg.X21, 31, 4);
+        cb.str64(cg.ZR, 31, 8);
+
+        cb.movRImm64(cg.X8, 198);
+        cb.movRImm64(cg.X0, 2);
+        cb.movRImm64(cg.X1, 1);
+        cb.mov(cg.X2, cg.ZR);
+        cb.svc(0);
+        cb.mov(cg.X19, cg.X0);
+
+        var error_branches: [8]usize = .{0} ** 8;
+        var error_count: usize = 0;
+
+        cb.cmp(cg.X19, cg.ZR);
+        error_branches[error_count] = cb.len;
+        error_count += 1;
+        cb.blt();
+
+        cb.movRImm64(cg.X8, 203);
+        cb.mov(cg.X0, cg.X19);
+        cb.addi(cg.X1, 31, 0);
+        cb.movRImm64(cg.X2, 16);
+        cb.svc(0);
+        cb.cmp(cg.X0, cg.ZR);
+        error_branches[error_count] = cb.len;
+        error_count += 1;
+        cb.blt();
+
+        emitAddrFromSp(cb, cg.X20, request_off);
+        if (is_post) emitWriteLit(cb, cg.X20, "POST ") else emitWriteLit(cb, cg.X20, "GET ");
+        cb.cmp(cg.X23, cg.ZR);
+        const path_copy_branch = cb.len;
+        cb.bne();
+        emitWriteLit(cb, cg.X20, "/");
+        const path_done_jump = cb.len;
+        cb.branch();
+        const path_copy_pos = cb.len;
+        cb.patchBCond(path_copy_branch, path_copy_pos);
+        emitCopyCString(cb, cg.X20, cg.X23);
+        cb.patchB(path_done_jump, cb.len);
+        emitWriteLit(cb, cg.X20, " HTTP/1.0\r\nHost: ");
+        emitWriteIpHost(cb, cg.X21, cg.X20);
+        emitWriteLit(cb, cg.X20, "\r\nConnection: close\r\n");
+        if (is_post) {
+            emitWriteLit(cb, cg.X20, "Content-Length: ");
+            emitWriteUnsignedDecimal(cb, cg.X25, cg.X20);
+            emitWriteLit(cb, cg.X20, "\r\nContent-Type: application/x-www-form-urlencoded\r\n");
+        }
+        emitWriteLit(cb, cg.X20, "\r\n");
+        if (is_post) {
+            cb.cmp(cg.X24, cg.ZR);
+            const body_done_branch = cb.len;
+            cb.beq();
+            emitCopyCString(cb, cg.X20, cg.X24);
+            cb.patchBCond(body_done_branch, cb.len);
+        }
+
+        emitAddrFromSp(cb, cg.X26, request_off);
+        cb.mov(cg.X27, cg.X26);
+        cb.sub(cg.X28, cg.X20, cg.X26);
+
+        const write_loop = cb.len;
+        cb.cmp(cg.X28, cg.ZR);
+        const write_done_branch = cb.len;
+        cb.beq();
+        cb.movRImm64(cg.X8, 64);
+        cb.mov(cg.X0, cg.X19);
+        cb.mov(cg.X1, cg.X27);
+        cb.mov(cg.X2, cg.X28);
+        cb.svc(0);
+        cb.cmp(cg.X0, cg.ZR);
+        error_branches[error_count] = cb.len;
+        error_count += 1;
+        cb.ble();
+        cb.add(cg.X27, cg.X27, cg.X0);
+        cb.sub(cg.X28, cg.X28, cg.X0);
+        const write_jump = cb.len;
+        cb.branch();
+        cb.patchB(write_jump, write_loop);
+        cb.patchBCond(write_done_branch, cb.len);
+
+        emitAddrFromSp(cb, cg.X21, response_off);
+        cb.movRImm64(cg.X22, 8191);
+        const read_loop = cb.len;
+        cb.cmp(cg.X22, cg.ZR);
+        const read_done_empty = cb.len;
+        cb.beq();
+        cb.movRImm64(cg.X8, 63);
+        cb.mov(cg.X0, cg.X19);
+        cb.mov(cg.X1, cg.X21);
+        cb.mov(cg.X2, cg.X22);
+        cb.svc(0);
+        cb.cmp(cg.X0, cg.ZR);
+        const read_ok_branch = cb.len;
+        cb.bgt();
+        const read_done_jump = cb.len;
+        cb.branch();
+        const read_ok_pos = cb.len;
+        cb.patchBCond(read_ok_branch, read_ok_pos);
+        cb.add(cg.X21, cg.X21, cg.X0);
+        cb.sub(cg.X22, cg.X22, cg.X0);
+        const read_jump = cb.len;
+        cb.branch();
+        cb.patchB(read_jump, read_loop);
+        const read_done_pos = cb.len;
+        cb.patchBCond(read_done_empty, read_done_pos);
+        cb.patchB(read_done_jump, read_done_pos);
+        cb.str8(cg.ZR, cg.X21, 0);
+
+        cb.movRImm64(cg.X8, 57);
+        cb.mov(cg.X0, cg.X19);
+        cb.svc(0);
+        emitAddrFromSp(cb, cg.X0, response_off);
+        emitStackAdd(cb, total_stack);
+        const success_done_jump = cb.len;
+        cb.branch();
+
+        const error_pos = cb.len;
+        var epi: usize = 0;
+        while (epi < error_count) : (epi += 1) cb.patchBCond(error_branches[epi], error_pos);
+        cb.movRImm64(cg.X8, 57);
+        cb.mov(cg.X0, cg.X19);
+        cb.svc(0);
+        cb.mov(cg.X0, cg.ZR);
+        emitStackAdd(cb, total_stack);
+
+        cb.patchB(success_done_jump, cb.len);
+        return;
+     }
+     if (eq(name, "setTheme")) {
+         // setTheme(fd, theme_id) -> sends CMD_SET_THEME to gui_srv
+         // fd: file descriptor to write to (gui_srv write end from guiServer)
+         // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light
+         var args_list: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+         var arg_i: usize = 0;
+         var ch = n.first_child;
+         while (ch != parser_mod.NO_NODE and arg_i < 2) {
+             args_list[arg_i] = ch;
+             ch = pool[@as(usize, @intCast(ch))].next_sibling;
+             arg_i += 1;
+         }
+
+         compileArmArgToReg(args_list[0], cg.X19, 0, pool, cb, vars, vc, frame);
+         compileArmArgToReg(args_list[1], cg.X20, 0, pool, cb, vars, vc, frame);
+
+         cb.subi(31, 31, 64);
+         cb.movRImm64(cg.X0, 13);
+         cb.str8(cg.X0, 31, 0);
+         cb.movRImm64(cg.X21, 255);
+         cb.and_(cg.X0, cg.X20, cg.X21);
+         cb.str8(cg.X0, 31, 1);
+         cb.lsrImm(cg.X0, cg.X20, 8);
+         cb.and_(cg.X0, cg.X0, cg.X21);
+         cb.str8(cg.X0, 31, 2);
+         cb.lsrImm(cg.X0, cg.X20, 16);
+         cb.and_(cg.X0, cg.X0, cg.X21);
+         cb.str8(cg.X0, 31, 3);
+         cb.lsrImm(cg.X0, cg.X20, 24);
+         cb.and_(cg.X0, cg.X0, cg.X21);
+         cb.str8(cg.X0, 31, 4);
+         {
+             var off: i32 = 5;
+             while (off < 61) : (off += 1) cb.str8(cg.ZR, 31, off);
+         }
+
+         cb.movRImm64(cg.X8, 64);
+         cb.mov(cg.X0, cg.X19);
+         cb.addi(cg.X1, 31, 0);
+         cb.movRImm64(cg.X2, 61);
+         cb.svc(0);
+         cb.addi(31, 31, 32);
+         cb.addi(31, 31, 32);
+
+         return;
+     }
+     cb.mov(cg.X0, cg.ZR);
 }
 
 fn compileFieldAccess(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, frame: i32) void {

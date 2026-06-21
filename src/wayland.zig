@@ -40,6 +40,7 @@ pub const WlConn = struct {
     shm_pool_id: u32,
     buffer_id: u32,
     callback_id: u32,
+    pointer_id: u32,
     shm_ptr: [*]u8,
     shm_size: usize,
     w: u32,
@@ -75,7 +76,7 @@ pub const WlConn = struct {
             .fd = fd, .display_id = 1, .registry_id = 2, .compositor_id = 0,
             .shm_id = 0, .seat_id = 0, .wm_base_id = 0, .surface_id = 0,
             .shell_surface_id = 0, .shm_pool_id = 0, .buffer_id = 0,
-            .callback_id = 0, .shm_ptr = undefined, .shm_size = 0,
+            .callback_id = 0, .pointer_id = 0, .shm_ptr = undefined, .shm_size = 0,
             .w = 0, .h = 0, .running = true, .shift = false,
         };
 
@@ -172,6 +173,11 @@ pub const WlConn = struct {
             const kb_id: u32 = 200;
             const msg = packObj(kb_id);
             self.wlMsg(self.seat_id, 0, msg[0..]);
+        }
+        if (caps & 2 != 0) {
+            self.pointer_id = 201;
+            const msg = packObj(self.pointer_id);
+            self.wlMsg(self.seat_id, 1, msg[0..]);
         }
     }
 
@@ -277,30 +283,72 @@ pub const WlConn = struct {
         writeStr(self.fd, &buf4);
     }
 
-    pub fn dispatchEvents(self: *WlConn) void {
+    pub fn pollEvent(self: *WlConn) ?sys.Event {
+        var pfd: [1]sys.PollFd = undefined;
+        pfd[0] = sys.PollFd{ .fd = self.fd, .events = sys.POLLIN, .revents = 0 };
+        const n = sys.poll(&pfd, 1, 15);
+        if (n <= 0) return null;
+
         var hdr: [8]u8 = undefined;
-        while (true) {
-            var pfd: [1]sys.PollFd = undefined;
-            pfd[0] = sys.PollFd{ .fd = self.fd, .events = sys.POLLIN, .revents = 0 };
-            const n = sys.poll(&pfd, 1, 0);
-            if (n <= 0) break;
+        if (!readExact(self.fd, &hdr)) return null;
+        const obj = read32(&hdr, 0);
+        const op = @as(u16, @truncate(read32(&hdr, 4) >> 16));
+        const size = read32(&hdr, 4) & 0xFFFF;
+        if (size < 8) return null;
+        const plen = size - 8;
+        var payload: [256]u8 = undefined;
+        if (plen > 0) { if (!readExact(self.fd, payload[0..plen])) return null; }
 
-            if (!readExact(self.fd, &hdr)) { self.running = false; return; }
-            const obj = read32(&hdr, 0);
-            const op = @as(u16, @truncate(read32(&hdr, 4) >> 16));
-            const size = read32(&hdr, 4) & 0xFFFF;
-            if (size < 8) { self.running = false; return; }
-            const plen = size - 8;
-            var payload: [256]u8 = undefined;
-            if (plen > 0) { if (!readExact(self.fd, payload[0..plen])) { self.running = false; return; } }
-
-            if (obj == self.seat_id + 1 and op == 0) {
-                const kc = payload[4];
-                if (kc == 1) self.running = false;
-                if (kc == 14) self.shift = true;
-                if (kc == 15) self.shift = false;
+        if (obj == self.seat_id + 1 and op == 0) {
+            const kc = payload[4];
+            const state = payload[0];
+            if (kc == 14) self.shift = true;
+            if (kc == 15) self.shift = false;
+            if (state == 1) {
+                if (kc == 1) return sys.Event{ .close = {} };
+                return sys.Event{ .key_press = kc };
+            } else {
+                return sys.Event{ .key_release = kc };
             }
         }
+         if (self.pointer_id != 0 and obj == self.pointer_id) {
+             if (op == 2 and plen >= 16) {
+                 const x = @as(i32, @intCast(read32(&payload, 8) / 256));
+                 const y = @as(i32, @intCast(read32(&payload, 12) / 256));
+                 return sys.Event{ .mouse_move = .{ .x = x, .y = y } };
+             }
+             if (op == 3 and plen >= 24) {
+                 const button = read32(&payload, 8);
+                 const state = read32(&payload, 12);
+                 const x = @as(i32, @intCast(read32(&payload, 16) / 256));
+                 const y = @as(i32, @intCast(read32(&payload, 20) / 256));
+                 const btn: u8 = switch (button) {
+                     272 => 1, 273 => 3, 274 => 2, 275 => 4, 276 => 5,
+                     else => 0,
+                 };
+                 if (state == 1) {
+                     return sys.Event{ .mouse_down = .{ .x = x, .y = y, .btn = btn } };
+                 } else {
+                     return sys.Event{ .mouse_up = .{ .x = x, .y = y, .btn = btn } };
+                 }
+             }
+             if (op == 4 and plen >= 12) {
+                 const axis = read32(&payload, 8);
+                 const value = read32(&payload, 12);
+                 const val_i = @as(i32, @bitCast(value));
+                 var dx: i32 = 0;
+                 var dy: i32 = 0;
+                 if (axis == 0) {
+                     dy = val_i >> 24;
+                 } else if (axis == 1) {
+                     dx = val_i >> 24;
+                 }
+                 if (dx != 0 or dy != 0) {
+                     return sys.Event{ .scroll = .{ .dx = dx, .dy = dy } };
+                 }
+             }
+         }
+        return null;
     }
 
     pub fn close(self: *WlConn) void {

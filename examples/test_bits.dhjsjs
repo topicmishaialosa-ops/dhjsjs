@@ -1,0 +1,10 @@
+fn main() int {
+    hui a = 0x500000004;
+    hui b = a & 0xFFFFFFFF;
+    hui c = a >> 32;
+    if (b == 4) { print("b=4\n"); }
+    uebok { print("b!=4\n"); }
+    if (c == 5) { print("c=5\n"); }
+    uebok { print("c!=5\n"); }
+    return 0;
+}

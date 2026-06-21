@@ -29,6 +29,11 @@ pub const AndroidCmd = struct {
     get_y_fn: u64,
     get_keycode_fn: u64,
     present_fn: u64,
+    touch_count: u32,
+    touch_x_arr: [16]f32,
+    touch_y_arr: [16]f32,
+    touch_down_arr: [16]u32,
+    touch_id_arr: [16]u32,
 };
 
 pub const AndroidFb = struct {
@@ -64,5 +69,10 @@ pub fn initCmd() AndroidCmd {
         .get_y_fn = 0,
         .get_keycode_fn = 0,
         .present_fn = 0,
+        .touch_count = 0,
+        .touch_x_arr = [_]f32{0} ** 16,
+        .touch_y_arr = [_]f32{0} ** 16,
+        .touch_down_arr = [_]u32{0} ** 16,
+        .touch_id_arr = [_]u32{0} ** 16,
     };
 }

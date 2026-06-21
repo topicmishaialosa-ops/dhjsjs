@@ -1,0 +1,4 @@
+fn main() int {
+    guiApp();
+    return 0;
+}

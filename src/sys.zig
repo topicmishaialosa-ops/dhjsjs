@@ -47,6 +47,18 @@ const WIN32_FUNCS = if (is_windows) struct {
     extern "kernel32" fn GetCommandLineA() [*]u8;
     extern "kernel32" fn GetModuleFileNameA(hModule: usize, lpFilename: [*]u8, nSize: u32) u32;
     extern "kernel32" fn GetLastError() u32;
+    extern "ws2_32" fn WSAStartup(wVersionRequested: u16, lpWSAData: *WSAData) i32;
+    extern "ws2_32" fn WSACleanup() i32;
+    extern "ws2_32" fn socket(af: i32, type_: i32, protocol: i32) usize;
+    extern "ws2_32" fn connect(s: usize, name: [*]const u8, namelen: i32) i32;
+    extern "ws2_32" fn bind(s: usize, name: [*]const u8, namelen: i32) i32;
+    extern "ws2_32" fn listen(s: usize, backlog: i32) i32;
+    extern "ws2_32" fn accept(s: usize, addr: [*]u8, addrlen: *i32) usize;
+    extern "ws2_32" fn send(s: usize, buf: [*]const u8, len: i32, flags: i32) i32;
+    extern "ws2_32" fn recv(s: usize, buf: [*]u8, len: i32, flags: i32) i32;
+    extern "ws2_32" fn closesocket(s: usize) i32;
+    extern "ws2_32" fn WSAPoll(fdArray: [*]PollFd, fds: u32, timeout: i32) i32;
+    extern "ws2_32" fn ioctlsocket(s: usize, cmd: i32, argp: *u32) i32;
 } else struct {
     pub fn GetStdHandle(_: u32) usize { unreachable; }
     pub fn WriteFile(_: usize, _: [*]const u8, _: u32, _: *u32, _: ?*anyopaque) i32 { unreachable; }
@@ -65,6 +77,28 @@ const WIN32_FUNCS = if (is_windows) struct {
     pub fn GetCommandLineA() [*]u8 { unreachable; }
     pub fn GetModuleFileNameA(_: usize, _: [*]u8, _: u32) u32 { unreachable; }
     pub fn GetLastError() u32 { unreachable; }
+    pub fn WSAStartup(_: u16, _: *WSAData) i32 { unreachable; }
+    pub fn WSACleanup() i32 { unreachable; }
+    pub fn socket(_: i32, _: i32, _: i32) usize { unreachable; }
+    pub fn connect(_: usize, _: [*]const u8, _: i32) i32 { unreachable; }
+    pub fn bind(_: usize, _: [*]const u8, _: i32) i32 { unreachable; }
+    pub fn listen(_: usize, _: i32) i32 { unreachable; }
+    pub fn accept(_: usize, _: [*]u8, _: *i32) usize { unreachable; }
+    pub fn send(_: usize, _: [*]const u8, _: i32, _: i32) i32 { unreachable; }
+    pub fn recv(_: usize, _: [*]u8, _: i32, _: i32) i32 { unreachable; }
+    pub fn closesocket(_: usize) i32 { unreachable; }
+    pub fn WSAPoll(_: [*]PollFd, _: u32, _: i32) i32 { unreachable; }
+    pub fn ioctlsocket(_: usize, _: i32, _: *u32) i32 { unreachable; }
+};
+
+pub const WSAData = extern struct {
+    wVersion: u16,
+    wHighVersion: u16,
+    iMaxSockets: u16,
+    iMaxUdpDg: u16,
+    lpVendorInfo: [*]u8,
+    szDescription: [257]u8,
+    szSystemStatus: [129]u8,
 };
 
 pub const AF_UNIX: i32 = 1;
@@ -77,6 +111,10 @@ pub const SO_REUSEADDR: i32 = 2;
 pub const SO_REUSEPORT: i32 = 15;
 pub const SO_BINDTODEVICE: i32 = 25;
 pub const O_RDWR: i32 = if (is_windows) 0 else 2;
+pub const MAKEWORD: fn (u8, u8) u16 = struct { fn impl(a: u8, b: u8) u16 { return @as(u16, a) | (@as(u16, b) << 8); } }.impl;
+pub const FIONBIO: i32 = 0x8004667E;
+pub const SD_SEND: i32 = 1;
+pub const MSG_WAITALL: i32 = 8;
 pub const PROT_READ: i32 = 1;
 pub const PROT_WRITE: i32 = 2;
 pub const MAP_SHARED: i32 = 1;
@@ -108,7 +146,7 @@ pub const ISIG_OFF: u32 = 0xFFFE;
 pub const VMIN: usize = 6;
 pub const VTIME: usize = 5;
 
-pub const SockAddrIn = struct { family: u16, port: u16, addr: u32, zero: [8]u8 };
+pub const SockAddrIn = extern struct { family: u16, port: u16, addr: u32, zero: [8]u8 };
 
 pub const PollFd = struct { fd: i32, events: i16, revents: i16 };
 
@@ -126,7 +164,7 @@ pub const Termios = extern struct { iflag: u32, oflag: u32, cflag: u32, lflag: u
 pub const Winsize = struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 };
 
 pub fn htons(x: u16) u16 {
-    return @as(u16, (@as(u32, x) << 8) | (@as(u32, x) >> 8));
+    return @truncate((@as(u32, x) << 8) | (@as(u32, x) >> 8));
 }
 
 pub fn inetAddr(ip: [*]const u8) u32 {
@@ -359,44 +397,92 @@ pub fn memfdCreate(name: []const u8, flags: u32) i32 {
     return @as(i32, @intCast(@as(isize, @bitCast(syscall2(SYS_MEMFD_CREATE, @intFromPtr(name.ptr), flags)))));
 }
 
+var winsock_started: bool = false;
+
+pub fn socketInit() i32 {
+    if (comptime is_windows) {
+        if (!winsock_started) {
+            var wsa_data: WSAData = undefined;
+            if (WIN32_FUNCS.WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) return -1;
+            winsock_started = true;
+        }
+    }
+    return 0;
+}
+
 pub fn socket(domain: i32, type_: i32, protocol: i32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        _ = socketInit();
+        const s = WIN32_FUNCS.socket(domain, type_, protocol);
+        if (s == ~@as(usize, 0)) return -1;
+        return @as(i32, @intCast(s));
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_SOCKET, @as(usize, @bitCast(@as(isize, domain))), @as(usize, @bitCast(@as(isize, type_))), @as(usize, @bitCast(@as(isize, protocol))))))));
 }
 
 pub fn connect(fd: i32, addr: [*]const u8, addrlen: u32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        return WIN32_FUNCS.connect(@as(usize, @bitCast(@as(isize, fd))), addr, @as(i32, @intCast(addrlen)));
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_CONNECT, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(addr), addrlen)))));
 }
 
 pub fn poll(fds: [*]PollFd, nfds: usize, timeout: i32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        return WIN32_FUNCS.WSAPoll(fds, @as(u32, @intCast(nfds)), timeout);
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_POLL, @intFromPtr(fds), nfds, @as(usize, @bitCast(@as(isize, timeout))))))));
 }
 
 pub fn bind(fd: i32, addr: [*]const u8, addrlen: u32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        return WIN32_FUNCS.bind(@as(usize, @bitCast(@as(isize, fd))), addr, @as(i32, @intCast(addrlen)));
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_BIND, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(addr), addrlen)))));
 }
 
 pub fn listen(fd: i32, backlog: i32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        return WIN32_FUNCS.listen(@as(usize, @bitCast(@as(isize, fd))), backlog);
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall2(SYS_LISTEN, @as(usize, @bitCast(@as(isize, fd))), @as(usize, @bitCast(@as(isize, backlog))))))));
 }
 
 pub fn accept(fd: i32, addr: [*]u8, addrlen: *u32) i32 {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        var wlen: i32 = @as(i32, @intCast(addrlen.*));
+        const s = WIN32_FUNCS.accept(@as(usize, @bitCast(@as(isize, fd))), addr, &wlen);
+        addrlen.* = @as(u32, @intCast(wlen));
+        if (s == ~@as(usize, 0)) return -1;
+        return @as(i32, @intCast(s));
+    }
     return @as(i32, @intCast(@as(isize, @bitCast(syscall3(SYS_ACCEPT, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(addr), @intFromPtr(addrlen))))));
 }
 
 pub fn send(fd: i32, buf: [*]const u8, len: usize, flags: i32) isize {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        const n = WIN32_FUNCS.send(@as(usize, @bitCast(@as(isize, fd))), buf, @as(i32, @intCast(len)), flags);
+        if (n < 0) return -1;
+        return @as(isize, @intCast(n));
+    }
     return @bitCast(syscall6(SYS_SEND, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(buf), len, @as(usize, @bitCast(@as(isize, flags))), 0, 0));
 }
 
 pub fn recv(fd: i32, buf: [*]u8, len: usize, flags: i32) isize {
-    if (!is_linux) return -1;
+    if (is_windows) {
+        const n = WIN32_FUNCS.recv(@as(usize, @bitCast(@as(isize, fd))), buf, @as(i32, @intCast(len)), flags);
+        if (n < 0) return -1;
+        return @as(isize, @intCast(n));
+    }
     return @bitCast(syscall6(SYS_RECV, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(buf), len, @as(usize, @bitCast(@as(isize, flags))), 0, 0));
+}
+
+pub fn closeSocket(fd: i32) i32 {
+    if (is_windows) {
+        return WIN32_FUNCS.closesocket(@as(usize, @bitCast(@as(isize, fd))));
+    }
+    close(fd);
+    return 0;
 }
 
 pub fn sendAll(fd: i32, buf: [*]const u8, len: usize) bool {
@@ -452,6 +538,12 @@ pub fn fstat(fd: i32, stat: *Stat) i32 {
 
 pub fn resolveHostname(hostname: []const u8) u32 {
     if (!is_linux) return 0;
+    const ip = resolveHostsFile(hostname);
+    if (ip != 0) return ip;
+    return dnsQuery(hostname);
+}
+
+fn resolveHostsFile(hostname: []const u8) u32 {
     const fd = open("/etc/hosts\x00", 0, 0);
     if (fd < 0) return 0;
     defer _ = close(fd);
@@ -487,6 +579,130 @@ pub fn resolveHostname(hostname: []const u8) u32 {
         }
     }
     return 0;
+}
+
+fn dnsQuery(hostname: []const u8) u32 {
+    if (hostname.len == 0 or hostname.len > 253) return 0;
+
+    var buf: [512]u8 = undefined;
+    buf[0] = 0x12; buf[1] = 0x34;
+    buf[2] = 0x01; buf[3] = 0x00;
+    buf[4] = 0x00; buf[5] = 0x01;
+    buf[6] = 0x00; buf[7] = 0x00;
+    buf[8] = 0x00; buf[9] = 0x00;
+    buf[10] = 0x00; buf[11] = 0x00;
+
+    var pos: usize = 12;
+    var start: usize = 0;
+    var i: usize = 0;
+    while (i <= hostname.len) : (i += 1) {
+        if (i == hostname.len or hostname[i] == '.') {
+            if (i > start) {
+                const llen = i - start;
+                if (llen > 63) return 0;
+                buf[pos] = @as(u8, @intCast(llen)); pos += 1;
+                var j: usize = 0;
+                while (j < llen) : (j += 1) { buf[pos] = hostname[start + j]; pos += 1; }
+            }
+            start = i + 1;
+        }
+    }
+    buf[pos] = 0; pos += 1;
+    buf[pos] = 0; buf[pos+1] = 1; pos += 2;
+    buf[pos] = 0; buf[pos+1] = 1; pos += 2;
+    const qlen = pos;
+
+    const fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return 0;
+    defer _ = closeSocket(fd);
+
+    const ns_ip = getNameServer();
+    if (ns_ip == 0) return 0;
+
+    var addr: SockAddrIn = undefined;
+    addr.family = @as(u16, @intCast(AF_INET));
+    addr.port = htons(53);
+    addr.addr = ns_ip;
+    addr.zero = [_]u8{0} ** 8;
+    const addr_bytes = @as([*]const u8, @ptrCast(&addr));
+    if (connect(fd, addr_bytes, @sizeOf(SockAddrIn)) < 0) return 0;
+
+    if (send(fd, &buf, qlen, 0) < 0) return 0;
+
+    var pfd: [1]PollFd = undefined;
+    pfd[0].fd = fd;
+    pfd[0].events = 1;
+    if (poll(&pfd, 1, 5000) <= 0) return 0;
+
+    var resp: [512]u8 = undefined;
+    const n = recv(fd, &resp, resp.len, 0);
+    if (n < 12) return 0;
+    const rn = @as(usize, @intCast(n));
+
+    if (resp[0] != 0x12 or resp[1] != 0x34) return 0;
+    if ((resp[2] & 0x80) == 0) return 0;
+    if ((resp[3] & 0x0F) != 0) return 0;
+
+    const qdcount = (@as(usize, resp[4]) << 8) | resp[5];
+    const ancount = (@as(usize, resp[6]) << 8) | resp[7];
+    if (ancount == 0) return 0;
+
+    pos = 12;
+    var qi: usize = 0;
+    while (qi < qdcount) : (qi += 1) {
+        while (pos < rn and resp[pos] != 0) {
+            if ((resp[pos] & 0xC0) == 0xC0) { pos += 2; break; }
+            pos += 1 + resp[pos];
+        }
+        pos += 1;
+        pos += 4;
+    }
+
+    var ai: usize = 0;
+    while (ai < ancount and pos + 10 < rn) : (ai += 1) {
+        if ((resp[pos] & 0xC0) == 0xC0) { pos += 2; }
+        else { while (pos < rn and resp[pos] != 0) pos += 1 + resp[pos]; pos += 1; }
+        if (pos + 10 > rn) return 0;
+        const atype = (@as(usize, resp[pos]) << 8) | resp[pos+1]; pos += 2;
+        const aclass = (@as(usize, resp[pos]) << 8) | resp[pos+1]; pos += 2;
+        pos += 4;
+        const rdlen = (@as(usize, resp[pos]) << 8) | resp[pos+1]; pos += 2;
+        if (atype == 1 and aclass == 1 and rdlen == 4 and pos + 4 <= rn) {
+            return @as(u32, resp[pos]) | (@as(u32, resp[pos+1]) << 8) | (@as(u32, resp[pos+2]) << 16) | (@as(u32, resp[pos+3]) << 24);
+        }
+        pos += rdlen;
+    }
+    return 0;
+}
+
+fn getNameServer() u32 {
+    const fd = open("/etc/resolv.conf\x00", 0, 0);
+    if (fd >= 0) {
+        defer _ = close(fd);
+        var buf: [1024]u8 = undefined;
+        const n = read(fd, &buf, buf.len);
+        if (n > 0) {
+            var i: usize = 0;
+            const len = @as(usize, @intCast(n));
+            while (i + 10 < len) {
+                if (buf[i] == 'n' and buf[i+1] == 'a' and buf[i+2] == 'm' and buf[i+3] == 'e' and buf[i+4] == 's' and buf[i+5] == 'e' and buf[i+6] == 'r' and buf[i+7] == 'v' and buf[i+8] == 'e' and buf[i+9] == 'r' and (buf[i+10] == ' ' or buf[i+10] == '\t')) {
+                    i += 11;
+                    while (i < len and (buf[i] == ' ' or buf[i] == '\t')) i += 1;
+                    var octets: [4]u8 = undefined;
+                    var oi: usize = 0;
+                    while (oi < 4 and i < len) : (oi += 1) {
+                        var val: u32 = 0;
+                        while (i < len and buf[i] >= '0' and buf[i] <= '9') : (i += 1) val = val * 10 + (buf[i] - '0');
+                        octets[oi] = @as(u8, @intCast(val));
+                        if (oi < 3 and i < len and buf[i] == '.') i += 1;
+                    }
+                    if (oi == 4) return @as(u32, octets[0]) | (@as(u32, octets[1]) << 8) | (@as(u32, octets[2]) << 16) | (@as(u32, octets[3]) << 24);
+                }
+                i += 1;
+            }
+        }
+    }
+    return 0x08080808;
 }
 
 fn memchr(s: []const u8, byte: u8) ?usize {
@@ -551,4 +767,17 @@ pub const WavHeader = extern struct {
 pub const WavDataHeader = extern struct {
     data_id: [4]u8,
     data_len: u32,
+};
+
+// --- GUI events ------------------------------------------------------------
+pub const Event = union(enum) {
+    key_press: u8,
+    key_release: u8,
+    mouse_move: struct { x: i32, y: i32 },
+    mouse_down: struct { x: i32, y: i32, btn: u8 },
+    mouse_up: struct { x: i32, y: i32, btn: u8 },
+    scroll: struct { dx: i32, dy: i32 },
+    close,
+    resize: struct { w: u32, h: u32 },
+    expose,
 };

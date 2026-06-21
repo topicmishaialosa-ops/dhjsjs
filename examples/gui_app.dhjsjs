@@ -1,0 +1,6 @@
+fn main() int {
+    print("Launching GUI application...\n");
+    guiApp();
+    print("GUI closed\n");
+    return 0;
+}

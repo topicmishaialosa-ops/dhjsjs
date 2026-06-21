@@ -486,6 +486,36 @@ pub const style_nord_light = Style{
     .scrollbar_bg = 0xFFD8DCE5, .scrollbar_thumb = 0xFF5E81AC, .rounding = 4, .window_rounding = 6, .shadow = 20, .spacing = 4, .padding = 4,
 };
 
+pub const style_modern_dark = Style{
+    .bg = 0xFF161820, .panel_bg = 0xFF222532,
+    .button_bg = 0xFF3A3E52, .button_hover = 0xFF484C66, .button_active = 0xFF3A76D2, .button_text = 0xFFE8EBF8,
+    .text = 0xFFE8EBF8, .text_dim = 0xFFAFB6D2,
+    .accent = 0xFF6EA5FF, .accent_hover = 0xFF5690EE,
+    .input_bg = 0xFF1C1E2A, .input_border = 0xFF3A3E52, .input_text = 0xFFE8EBF8,
+    .border = 0xFF363A4A,
+    .slider_track = 0xFF34384A, .slider_thumb = 0xFF468AF0,
+    .separator = 0xFF323648,
+    .header_bg = 0xFF243458, .header_text = 0xFFE8EBF8,
+    .title_bg = 0xFF1E2030, .title_text = 0xFFE8EBF8,
+    .check_bg = 0xFF2A2D3E, .check_mark = 0xFF50D282,
+    .scrollbar_bg = 0xFF282B3C, .scrollbar_thumb = 0xFF468AF0, .rounding = 6, .window_rounding = 10, .shadow = 24, .spacing = 6, .padding = 6,
+};
+
+pub const style_modern_light = Style{
+    .bg = 0xFFF2F4F9, .panel_bg = 0xFFFFFFFF,
+    .button_bg = 0xFFDCE1EC, .button_hover = 0xFFC9D0DF, .button_active = 0xFF306CC3, .button_text = 0xFF1C2030,
+    .text = 0xFF1C2030, .text_dim = 0xFF6A7490,
+    .accent = 0xFF2A58A8, .accent_hover = 0xFF1E4A94,
+    .input_bg = 0xFFFFFFFF, .input_border = 0xFFD2D8E4, .input_text = 0xFF1C2030,
+    .border = 0xFFC8CEDC,
+    .slider_track = 0xFFD6DBE6, .slider_thumb = 0xFF3268C0,
+    .separator = 0xFFD6DBE6,
+    .header_bg = 0xFF204480, .header_text = 0xFFFFFFFF,
+    .title_bg = 0xFFE8EBF2, .title_text = 0xFF1C2030,
+    .check_bg = 0xFFFFFFFF, .check_mark = 0xFF269658,
+    .scrollbar_bg = 0xFFE4E7EF, .scrollbar_thumb = 0xFF3A78D0, .rounding = 6, .window_rounding = 10, .shadow = 24, .spacing = 6, .padding = 6,
+};
+
 pub const WidgetStateType = enum(u8) {
     none,
     text_input,
@@ -626,7 +656,6 @@ pub const Gui = struct {
         self.id_depth = 0;
         self.layout_depth = 0;
         self.window_depth = 0;
-        self.state_count = 0;
         self.clip_rect = gfx.Rect{ .x = 0, .y = 0, .w = fb.width, .h = fb.height };
         self.fb.fill(gfx.rgb(
             @as(u8, @truncate((self.style.bg >> 16) & 0xFF)),
@@ -706,20 +735,31 @@ pub const Gui = struct {
             self.active_id = 0;
         }
 
-        const bg = if (self.isActive(id)) self.style.button_active
+        const active = self.isActive(id);
+        const bg = if (active) self.style.button_active
             else if (hovered) self.style.button_hover
             else self.style.button_bg;
 
         const r = @min(self.style.rounding, @as(u8, @intCast(@min(area.w, area.h) / 2)));
-        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
-        if (hovered) {
+        if (hovered or active) {
             drawShadow(self.fb, area.x, area.y, area.w, area.h, self.style.shadow, r);
         }
-        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, self.style.border);
+        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        if (area.h > 6 and area.w > 6) {
+            const top_h = @max(@as(u32, 2), area.h / 2);
+            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, top_h, lightenColor(bg, if (hovered) 26 else 14));
+            fillRect(self.fb, area.x + 1, area.y + @as(i32, @intCast(area.h)) - 2, area.w - 2, 1, darkenColor(bg, 42));
+        }
+        if (active and area.w > @as(u32, r) * 2 + 2) {
+            fillRect(self.fb, area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 2, self.style.accent);
+        }
+        const border = if (active) self.style.accent_hover else if (hovered) self.style.accent else self.style.border;
+        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, border);
+        drawInsetBorder(self.fb, area.x + 1, area.y + 1, area.w -| 2, area.h -| 2, lightenColor(bg, 18), darkenColor(bg, 36));
         const tw = @as(i32, @intCast(label_text.len * 8));
         drawTextAt(self.fb, label_text,
             area.x + @divTrunc(@as(i32, @intCast(area.w)), 2) - @divTrunc(tw, 2),
-            area.y + @divTrunc(@as(i32, @intCast(bh)), 2) - 4,
+            area.y + @divTrunc(@as(i32, @intCast(bh)), 2) - 4 + (if (active) @as(i32, 1) else @as(i32, 0)),
             self.style.button_text, 8);
 
         return clicked;
@@ -747,6 +787,15 @@ pub const Gui = struct {
         const state = self.getOrCreateState(widget_id, .text_input);
 
         _ = label_text;
+        if (state.text_len == 0 and buf.len > 0 and buf[0] != 0) {
+            var bi: usize = 0;
+            while (bi < buf.len and bi < 255 and buf[bi] != 0) : (bi += 1) {
+                state.text_buf[bi] = buf[bi];
+            }
+            state.text_len = bi;
+            state.text_cursor = bi;
+        }
+
         const ih: u32 = 24;
         const iw: u32 = @max(160, @as(u32, @intCast(self.fb.width)) - 40);
         var area = self.allocSpace(iw, ih);
@@ -799,10 +848,17 @@ pub const Gui = struct {
         }
 
         const bg = self.style.input_bg;
-        const border = if (is_focused) self.style.accent else self.style.input_border;
+        const border = if (is_focused) self.style.accent else if (hovered) self.style.border else self.style.input_border;
         const r = @min(self.style.rounding, @as(u8, 4));
         fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        if (area.w > 6 and area.h > 6) {
+            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, 1, darkenColor(bg, 34));
+            fillRect(self.fb, area.x + 1, area.y + @as(i32, @intCast(area.h)) - 2, area.w - 2, 1, lightenColor(bg, 24));
+        }
         drawRectBorder(self.fb, area.x, area.y, area.w, area.h, border);
+        if (is_focused and area.w > 4 and area.h > 4) {
+            drawRectBorder(self.fb, area.x + 1, area.y + 1, area.w - 2, area.h - 2, mixColor(self.style.accent, bg, 95));
+        }
 
         var display_buf: [257]u8 = undefined;
         const display_len: usize = state.text_len;
@@ -852,42 +908,51 @@ pub const Gui = struct {
         const by = area.y + 2;
         const border = if (hovered) self.style.accent else self.style.border;
         const r = @min(self.style.rounding, @as(u8, 4));
-        fillRoundedRect(self.fb, bx, by, cw, ch, r, self.style.check_bg);
+        const box_bg = if (checked.*) mixColor(self.style.check_bg, self.style.accent, 150)
+            else if (hovered) lightenColor(self.style.check_bg, 18)
+            else self.style.check_bg;
+        fillRoundedRect(self.fb, bx, by, cw, ch, r, box_bg);
+        fillRect(self.fb, bx + 2, by + 2, cw - 4, 1, lightenColor(box_bg, 22));
         drawRectBorder(self.fb, bx, by, cw, ch, border);
 
         if (checked.*) {
-            fillRoundedRect(self.fb, bx + 3, by + 3, cw - 6, ch - 6, @as(u8, @intCast(if (r > 2) r - 2 else 0)), self.style.check_mark);
+            const mark = self.style.check_mark;
+            drawLineRaw(self.fb, bx + 5, by + 10, bx + 8, by + 13, mark);
+            drawLineRaw(self.fb, bx + 6, by + 10, bx + 9, by + 13, mark);
+            drawLineRaw(self.fb, bx + 8, by + 13, bx + 15, by + 5, mark);
+            drawLineRaw(self.fb, bx + 9, by + 13, bx + 16, by + 5, mark);
         }
 
-        drawTextAt(self.fb, label_text, bx + @as(i32, @intCast(cw)) + 6, by + 1, self.style.text, 8);
+        drawTextAt(self.fb, label_text, bx + @as(i32, @intCast(cw)) + 6, by + 1, if (hovered) self.style.text else self.style.text_dim, 8);
     }
 
     pub fn slider(self: *Gui, label_text: []const u8, value: *f32, min: f32, max: f32) bool {
         const id = self.nextId();
         const widget_id = id;
 
-        const sh: u32 = 20;
+        const sh: u32 = 22;
         const sw: u32 = @max(120, @as(u32, @intCast(self.fb.width - 40)));
-        var area = self.allocSpace(sw, sh + 16);
+        var area = self.allocSpace(sw, sh + 18);
         if (area.w < 20) area.w = sw;
 
-        const track_h: u32 = 6;
-        const thumb_r: u32 = 6;
+        const track_h: u32 = 8;
+        const thumb_w: u32 = 14;
+        const thumb_h: u32 = 18;
         const track_x = area.x;
-        const track_y = area.y + @divTrunc(@as(i32, @intCast(sh - track_h)), 2);
+        const track_y = area.y + @as(i32, @intCast(sh));
         const track_w = area.w;
 
         const range = max - min;
-        const norm = if (range != 0) (value.* - min) / range else 0.0;
-        const thumb_x = track_x + @as(i32, @intFromFloat(@as(f64, norm) * @as(f64, @floatFromInt(track_w))));
+        const raw_norm = if (range != 0) (value.* - min) / range else 0.0;
+        const norm = @min(@as(f32, 1.0), @max(@as(f32, 0.0), raw_norm));
+        const travel_w = if (track_w > 1) track_w - 1 else track_w;
+        const thumb_x = track_x + @as(i32, @intFromFloat(@as(f64, norm) * @as(f64, @floatFromInt(travel_w))));
 
-        const hovered = self.testHot(widget_id, thumb_x - @as(i32, @intCast(thumb_r)) - 4, track_y - @as(i32, @intCast(thumb_r)) - 2,
-            thumb_r * 2 + 8, track_h + thumb_r * 2 + 4);
-        _ = hovered;
+        const hovered = self.testHot(widget_id, track_x, area.y, track_w, area.h);
 
         var changed = false;
 
-        if (self.testHot(widget_id, track_x, track_y - 4, track_w, track_h + 8) and self.input.mouse_clicked) {
+        if (hovered and self.input.mouse_clicked) {
             self.active_id = widget_id;
         }
 
@@ -908,16 +973,21 @@ pub const Gui = struct {
         const thumb_fill = if (is_active) self.style.accent_hover else self.style.slider_thumb;
         const tr = @min(self.style.rounding, @as(u8, 4));
 
-        fillRoundedRect(self.fb, track_x, track_y, track_w, track_h, tr, self.style.slider_track);
+        fillRoundedRect(self.fb, track_x, track_y, track_w, track_h, tr, darkenColor(self.style.slider_track, 18));
+        fillRect(self.fb, track_x + 1, track_y + 1, track_w -| 2, 1, lightenColor(self.style.slider_track, 18));
 
         const fill_w: u32 = @intCast(@max(0, thumb_x - track_x));
         if (fill_w > 0) {
             fillRoundedRect(self.fb, track_x, track_y, fill_w, track_h, tr, self.style.accent);
+            fillRect(self.fb, track_x + 1, track_y + 1, fill_w -| 2, 1, lightenColor(self.style.accent, 24));
         }
 
-        const fr = @as(i32, @intCast(thumb_r));
-        fillRoundedRect(self.fb, thumb_x - fr, track_y - 2, fr * 2, track_h + 4, tr + 2, thumb_fill);
-        drawRectBorder(self.fb, thumb_x - fr, track_y - 2, fr * 2, track_h + 4, self.style.border);
+        const hx = thumb_x - @divTrunc(@as(i32, @intCast(thumb_w)), 2);
+        const hy = track_y - @divTrunc(@as(i32, @intCast(thumb_h - track_h)), 2);
+        drawShadow(self.fb, hx, hy, thumb_w, thumb_h, if (hovered or is_active) self.style.shadow else 10, tr + 2);
+        fillRoundedRect(self.fb, hx, hy, thumb_w, thumb_h, tr + 2, thumb_fill);
+        fillRect(self.fb, hx + 2, hy + 2, thumb_w - 4, 1, lightenColor(thumb_fill, 35));
+        drawRectBorder(self.fb, hx, hy, thumb_w, thumb_h, if (is_active) self.style.accent_hover else self.style.border);
 
         var lbl_buf: [32]u8 = undefined;
         var lbl_len: usize = 0;
@@ -956,7 +1026,7 @@ pub const Gui = struct {
             if (lbl_len < 30) { lbl_buf[lbl_len] = ch; lbl_len += 1; }
         }
 
-        drawTextAt(self.fb, lbl_buf[0..lbl_len], area.x, area.y + @as(i32, @intCast(sh)) - 14, self.style.text_dim, 8);
+        drawTextAt(self.fb, lbl_buf[0..lbl_len], area.x, area.y + 2, if (hovered or is_active) self.style.text else self.style.text_dim, 8);
         return changed;
     }
 
@@ -983,7 +1053,11 @@ pub const Gui = struct {
         const bg = if (hovered) self.style.button_hover else self.style.header_bg;
         const r = @min(self.style.rounding, @as(u8, 4));
         fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
-        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, self.style.border);
+        if (area.w > 8 and area.h > 8) {
+            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, 1, lightenColor(bg, 22));
+            fillRect(self.fb, area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 2, if (open.*) self.style.accent else self.style.separator);
+        }
+        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, if (hovered) self.style.accent else self.style.border);
 
         const arrow = if (open.*) "v" else ">";
         drawTextAt(self.fb, arrow, area.x + 4, area.y + 4, self.style.header_text, 8);
@@ -1038,24 +1112,35 @@ pub const Gui = struct {
             self.active_id = 0;
         }
 
-        fillRoundedRect(self.fb, area.x, area.y, total_w, bh, r, self.style.input_bg);
-        drawRectBorder(self.fb, area.x, area.y, total_w, bh, self.style.input_border);
+        const box_bg = if (hovered or is_open) lightenColor(self.style.input_bg, 16) else self.style.input_bg;
+        fillRoundedRect(self.fb, area.x, area.y, total_w, bh, r, box_bg);
+        if (total_w > 6 and bh > 6) {
+            fillRect(self.fb, area.x + 1, area.y + 1, total_w - 2, 1, lightenColor(box_bg, 24));
+            fillRect(self.fb, area.x + @as(i32, @intCast(total_w)) - 22, area.y + 1, 1, bh - 2, self.style.separator);
+        }
+        drawRectBorder(self.fb, area.x, area.y, total_w, bh, if (is_open) self.style.accent else if (hovered) self.style.border else self.style.input_border);
         if (current.* < items.len) {
             drawTextAt(self.fb, items[current.*], area.x + 6, area.y + 4, self.style.text, 8);
         }
-        drawTextAt(self.fb, if (is_open) "v" else ">", area.x + @as(i32, @intCast(total_w)) - 14, area.y + 4, self.style.text_dim, 8);
+        drawTextAt(self.fb, if (is_open) "v" else ">", area.x + @as(i32, @intCast(total_w)) - 15, area.y + 4, if (is_open) self.style.accent else self.style.text_dim, 8);
 
         if (is_open) {
+            const total_h = bh * @as(u32, @intCast(items.len));
+            drawShadow(self.fb, area.x, area.y + @as(i32, @intCast(bh)), total_w, total_h, self.style.shadow, r);
             var ci: usize = 0;
             while (ci < items.len) : (ci += 1) {
                 const iy = area.y + @as(i32, @intCast(bh)) + @as(i32, @intCast(ci * bh));
                 const isel = ci == current.*;
-                const ibg = if (isel) self.style.accent else self.style.panel_bg;
+                const item_hover = self.input.mouse_x >= area.x and self.input.mouse_x < area.x + @as(i32, @intCast(total_w)) and
+                    self.input.mouse_y >= iy and self.input.mouse_y < iy + @as(i32, @intCast(bh));
+                const ibg = if (isel) self.style.accent else if (item_hover) self.style.button_hover else self.style.panel_bg;
                 fillRoundedRect(self.fb, area.x, iy, total_w, bh, 0, ibg);
+                if (isel) {
+                    fillRect(self.fb, area.x, iy, 3, bh, self.style.accent_hover);
+                }
                 drawRectBorder(self.fb, area.x, iy, total_w, bh, self.style.border);
                 drawTextAt(self.fb, items[ci], area.x + 6, iy + 4, if (isel) self.style.button_text else self.style.text, 8);
             }
-            const total_h = bh * @as(u32, @intCast(items.len));
             drawRectBorder(self.fb, area.x, area.y + bh, total_w, total_h, self.style.border);
         }
 
@@ -1182,14 +1267,22 @@ pub const Gui = struct {
 
         const wr = self.style.window_rounding;
         drawShadow(self.fb, win_x, win_y, win_w, win_h, self.style.shadow, wr);
+        fillRoundedRect(self.fb, win_x, win_y, win_w, win_h, wr, self.style.panel_bg);
         fillRoundedRect(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), wr, self.style.title_bg);
-        drawRectBorder(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), self.style.border);
-        drawTextAt(self.fb, title, win_x + 8, win_y + 6, self.style.title_text, 8);
+        if (win_w > 8) {
+            fillRect(self.fb, win_x + @as(i32, wr), win_y + 1, win_w - @as(u32, wr) * 2, 1, lightenColor(self.style.title_bg, 24));
+            fillRect(self.fb, win_x + @as(i32, wr), win_y + @as(i32, @intCast(title_h)) - 3, win_w - @as(u32, wr) * 2, 2, self.style.accent);
+        }
+        drawTextAt(self.fb, title, win_x + 10, win_y + 7, self.style.title_text, 8);
 
         const client_y = win_y + title_h;
         const client_h = win_h - @as(u32, @intCast(title_h));
-        fillRoundedRect(self.fb, win_x, client_y, win_w, client_h, wr, self.style.panel_bg);
-        drawRectBorder(self.fb, win_x, client_y, win_w, client_h, self.style.border);
+        if (client_h > 4 and win_w > 4) {
+            fillRect(self.fb, win_x + 1, client_y, win_w - 2, 1, darkenColor(self.style.panel_bg, 18));
+            fillRect(self.fb, win_x + 1, win_y + @as(i32, @intCast(win_h)) - 2, win_w - 2, 1, lightenColor(self.style.panel_bg, 12));
+        }
+        drawRectBorder(self.fb, win_x, win_y, win_w, win_h, self.style.border);
+        drawInsetBorder(self.fb, win_x + 1, win_y + 1, win_w -| 2, win_h -| 2, lightenColor(self.style.panel_bg, 14), darkenColor(self.style.panel_bg, 34));
 
         if (resizable) {
             const resize_id = id + 0x2000;
@@ -1211,11 +1304,13 @@ pub const Gui = struct {
                     self.active_id = 0;
                 }
             }
+            drawLineRaw(self.fb, win_x + @as(i32, @intCast(win_w)) - 11, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 11, self.style.text_dim);
+            drawLineRaw(self.fb, win_x + @as(i32, @intCast(win_w)) - 8, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 8, self.style.text_dim);
         }
 
         if (self.layout_depth < MAX_LAYOUT_STACK) {
             self.layout_stack[self.layout_depth] = LayoutFrame{
-                .x = win_x + 8, .y = client_y + 4, .w = win_w - 16, .h = client_h - 8,
+                .x = win_x + 8, .y = client_y + 4, .w = win_w -| 16, .h = client_h -| 8,
                 .cursor_x = win_x + 8, .cursor_y = client_y + 4,
                 .max_x = win_x + 8, .max_y = client_y + 4,
                 .mode = .vertical, .spacing = @as(i32, self.style.spacing), .indent = 0,
@@ -1265,11 +1360,39 @@ pub const Gui = struct {
     }
 };
 
+fn colorR(c: u32) u8 { return @as(u8, @intCast((c >> 16) & 0xFF)); }
+fn colorG(c: u32) u8 { return @as(u8, @intCast((c >> 8) & 0xFF)); }
+fn colorB(c: u32) u8 { return @as(u8, @intCast(c & 0xFF)); }
+fn colorA(c: u32) u8 { return @as(u8, @intCast((c >> 24) & 0xFF)); }
+
+pub fn mixColor(a: u32, b: u32, amount_b: u8) u32 {
+    const ia = @as(u32, 255 - amount_b);
+    const ib = @as(u32, amount_b);
+    const r = (@as(u32, colorR(a)) * ia + @as(u32, colorR(b)) * ib) / 255;
+    const g = (@as(u32, colorG(a)) * ia + @as(u32, colorG(b)) * ib) / 255;
+    const bl = (@as(u32, colorB(a)) * ia + @as(u32, colorB(b)) * ib) / 255;
+    const al = (@as(u32, colorA(a)) * ia + @as(u32, colorA(b)) * ib) / 255;
+    return (al << 24) | (r << 16) | (g << 8) | bl;
+}
+
+pub fn lightenColor(c: u32, amount: u8) u32 {
+    return mixColor(c, 0xFFFFFFFF, amount);
+}
+
+pub fn darkenColor(c: u32, amount: u8) u32 {
+    return mixColor(c, 0xFF000000, amount);
+}
+
 fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) void {
+    if (w == 0 or h == 0) return;
     const x1: u32 = if (x < 0) 0 else @intCast(x);
     const y1: u32 = if (y < 0) 0 else @intCast(y);
-    const x2: u32 = @min(x1 + w, fb.width);
-    const y2: u32 = @min(y1 + h, fb.height);
+    const raw_x2 = x + @as(i32, @intCast(w));
+    const raw_y2 = y + @as(i32, @intCast(h));
+    if (raw_x2 <= 0 or raw_y2 <= 0) return;
+    const x2: u32 = @min(@as(u32, @intCast(raw_x2)), fb.width);
+    const y2: u32 = @min(@as(u32, @intCast(raw_y2)), fb.height);
+    if (x2 <= x1 or y2 <= y1) return;
     var yi = y1;
     while (yi < y2) : (yi += 1) {
         const row = @as(usize, yi) * fb.stride;
@@ -1280,7 +1403,7 @@ fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) vo
     }
 }
 
-fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, color: u32) void {
+pub fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, color: u32) void {
     if (r == 0 or w < @as(u32, @intCast(r * 2 + 2)) or h < @as(u32, @intCast(r * 2 + 2))) {
         fillRect(fb, x, y, w, h, color);
         return;
@@ -1322,7 +1445,7 @@ fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, 
     }
 }
 
-fn drawShadow(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, intensity: u8, r: u8) void {
+pub fn drawShadow(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, intensity: u8, r: u8) void {
     if (intensity == 0) return;
     const steps = @as(u32, @min(@as(u32, intensity) / 20 + 1, 4));
     var s: u32 = 1;
@@ -1345,6 +1468,34 @@ fn drawRectBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u
     fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, color);
     fillRect(fb, x, y, 1, h, color);
     fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, color);
+}
+
+fn drawInsetBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, light: u32, dark: u32) void {
+    if (w < 2 or h < 2) return;
+    fillRect(fb, x, y, w, 1, light);
+    fillRect(fb, x, y, 1, h, light);
+    fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, dark);
+    fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, dark);
+}
+
+fn drawLineRaw(fb: *gfx.Framebuffer, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) void {
+    const dx: i32 = if (x2 >= x1) x2 - x1 else x1 - x2;
+    const dy_abs: i32 = if (y2 >= y1) y2 - y1 else y1 - y2;
+    const dy: i32 = -dy_abs;
+    const sx: i32 = if (x1 < x2) 1 else -1;
+    const sy: i32 = if (y1 < y2) 1 else -1;
+    var err = dx + dy;
+    var cx = x1;
+    var cy = y1;
+    while (true) {
+        if (cx >= 0 and cy >= 0 and cx < @as(i32, @intCast(fb.width)) and cy < @as(i32, @intCast(fb.height))) {
+            fb.pixels[@as(usize, @intCast(cy)) * fb.stride + @as(usize, @intCast(cx))] = color;
+        }
+        if (cx == x2 and cy == y2) break;
+        const e2 = 2 * err;
+        if (e2 >= dy) { err += dy; cx += sx; }
+        if (e2 <= dx) { err += dx; cy += sy; }
+    }
 }
 
 fn drawTextAt(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, size: u32) void {

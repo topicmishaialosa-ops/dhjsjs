@@ -307,14 +307,15 @@ pub fn main() void {
             ide.paint(&fb);
             wlconn.putImage(fb.pixels, WIDTH, HEIGHT);
             wlconn.commit();
-            wlconn.dispatchEvents();
-            if (!wlconn.running) break;
-            var pfd: [1]sys.PollFd = undefined;
-            pfd[0] = sys.PollFd{ .fd = wlconn.fd, .events = sys.POLLIN, .revents = 0 };
-            if (sys.poll(&pfd, 1, 16) > 0 and (pfd[0].revents & sys.POLLIN) != 0) {
-                wlconn.dispatchEvents();
+            while (wlconn.pollEvent()) |ev| {
+                switch (ev) {
+                    .key_press => |kc| { if (kc == 1) wlconn.running = false; },
+                    .close => wlconn.running = false,
+                    else => {},
+                }
                 if (!wlconn.running) break;
             }
+            if (!wlconn.running) break;
         }
         wlconn.close();
     } else {

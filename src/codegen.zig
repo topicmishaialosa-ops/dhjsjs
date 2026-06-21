@@ -112,6 +112,24 @@ pub const CodeBuffer = struct {
         }
     }
 
+    pub fn movMemR32(self: *CodeBuffer, base: u8, off: i32, r: u8) void {
+        self.rex_if(r, base);
+        self.byte(0x89);
+        if (off == 0) {
+            self.modrm(0, r, base);
+        } else if (off >= -128 and off <= 127) {
+            self.modrm(1, r, base);
+        } else {
+            self.modrm(2, r, base);
+        }
+        if (base == RSP or base == R12) self.byte(0x24);
+        if (off >= -128 and off <= 127 and off != 0) {
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
+        } else if (off != 0) {
+            self.dword(@as(u32, @bitCast(off)));
+        }
+    }
+
     pub fn movRAReg(self: *CodeBuffer, r: u8, addr: u32) void {
         self.byte(0x48 | (if (r >= 8) 1 else 0));
         self.byte(0xA1);
@@ -125,7 +143,7 @@ pub const CodeBuffer = struct {
     }
 
     pub fn subRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        self.rex_if(dst, src);
+        self.rex_w(@as(u8, @intCast(src >> 3)), 0, @as(u8, @intCast(dst >> 3)));
         self.byte(0x29);
         self.modrm(3, src, dst);
     }
@@ -159,19 +177,19 @@ pub const CodeBuffer = struct {
     }
 
     pub fn xorRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        self.rex_if(dst, src);
+        self.rex_w(@as(u8, @intCast(src >> 3)), 0, @as(u8, @intCast(dst >> 3)));
         self.byte(0x31);
         self.modrm(3, src, dst);
     }
 
     pub fn cmpRImm32(self: *CodeBuffer, r: u8, val: i32) void {
         if (val >= -128 and val <= 127) {
-            self.rex_if(r, 0);
+            self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
             self.byte(0x83);
             self.modrm(3, 7, r);
             self.byte(@as(u8, @bitCast(@as(i8, @intCast(val)))));
         } else {
-            self.rex_if(r, 0);
+            self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
             self.byte(0x81);
             self.modrm(3, 7, r);
             self.dword(@as(u32, @bitCast(val)));
@@ -179,7 +197,7 @@ pub const CodeBuffer = struct {
     }
 
     pub fn imulRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        self.rex_if(dst, src);
+        self.rex_w(@as(u8, @intCast(dst >> 3)), 0, @as(u8, @intCast(src >> 3)));
         self.byte(0x0F);
         self.byte(0xAF);
         self.modrm(3, dst, src);
@@ -197,13 +215,13 @@ pub const CodeBuffer = struct {
     }
 
     pub fn andRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        self.rex_if(dst, src);
+        self.rex_w(@as(u8, @intCast(src >> 3)), 0, @as(u8, @intCast(dst >> 3)));
         self.byte(0x21);
         self.modrm(3, src, dst);
     }
 
     pub fn orRR(self: *CodeBuffer, dst: u8, src: u8) void {
-        self.rex_if(dst, src);
+        self.rex_w(@as(u8, @intCast(src >> 3)), 0, @as(u8, @intCast(dst >> 3)));
         self.byte(0x09);
         self.modrm(3, src, dst);
     }
@@ -237,6 +255,14 @@ pub fn shlRImm8(self: *CodeBuffer, r: u8, imm: u8) void {
     self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
     self.byte(0xC1);
     self.modrm(3, 4, r);
+    self.byte(imm);
+}
+
+pub fn shrRImm8(self: *CodeBuffer, r: u8, imm: u8) void {
+    if (imm == 0) return;
+    self.rex_w(0, 0, @as(u8, @intCast(r >> 3)));
+    self.byte(0xC1);
+    self.modrm(3, 5, r);
     self.byte(imm);
 }
 
@@ -285,7 +311,7 @@ pub fn pushfq(self: *CodeBuffer) void {
     }
 
     pub fn cmpRR(self: *CodeBuffer, a: u8, b: u8) void {
-        self.rex_if(b, a);
+        self.rex_w(@as(u8, @intCast(b >> 3)), 0, @as(u8, @intCast(a >> 3)));
         self.byte(0x39);
         self.modrm(3, b, a);
     }

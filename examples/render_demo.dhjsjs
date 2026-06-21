@@ -1,0 +1,135 @@
+// dhjsjs render demo — renders in X11 window via guiServer
+// Features: gradient fills, rounded rects, circles, Bresenham lines,
+// rect borders, pixel text via 10×16 font emulation.
+
+fn main() int {
+    hui fd = guiServer();
+    if (fd == 0) { print("guiServer failed\n"); return 1; }
+
+    hui W = 800; hui H = 600;
+
+    // ---- Background gradient (vertical) ----
+    hui c1_bg = (255 << 24) | (0x1a << 16) | (0x1a << 8) | 0x2e;
+    hui c2_bg = (255 << 24) | (0x16 << 16) | (0x21 << 8) | 0x3e;
+    hui bg_packed = (c2_bg << 32) | c1_bg;
+    guiCmd(fd, 11, 0, 0, 0, W, H, bg_packed, "");
+
+    // ---- Centered panel (rounded rect with border) ----
+    hui pw = W * 3 / 4; hui ph = H * 3 / 4;
+    hui px = (W - pw) / 2; hui py = (H - ph) / 2;
+    hui panel_c = (255 << 24) | (0x0f << 16) | (0x34 << 8) | 0x60;
+    hui border_c = (255 << 24) | (0x53 << 16) | (0x34 << 8) | 0x83;
+    hui rr = 12;
+    if (rr > pw / 2) { rr = pw / 2; }
+    if (rr > ph / 2) { rr = ph / 2; }
+
+    guiCmd(fd, 7, 0, px + rr, py, pw - rr * 2, ph, panel_c, "");
+    guiCmd(fd, 7, 0, px, py + rr, rr, ph - rr * 2, panel_c, "");
+    guiCmd(fd, 7, 0, px + pw - rr, py + rr, rr, ph - rr * 2, panel_c, "");
+
+    hui rs = rr - 1; hui r2 = rs * rs;
+    hui ci = 0;
+    while (ci <= rs) {
+        hui cj = 0;
+        while (cj <= rs) {
+            hui ax = rs - cj; hui ay = rs - ci;
+            if (ax * ax + ay * ay <= r2) {
+                guiCmd(fd, 6, 0, px + rr - 1 - cj, py + rr - 1 - ci, 0, 0, panel_c, "");
+                guiCmd(fd, 6, 0, px + pw - rr + cj, py + rr - 1 - ci, 0, 0, panel_c, "");
+                guiCmd(fd, 6, 0, px + rr - 1 - cj, py + ph - rr + ci, 0, 0, panel_c, "");
+                guiCmd(fd, 6, 0, px + pw - rr + cj, py + ph - rr + ci, 0, 0, panel_c, "");
+            }
+            cj = cj + 1;
+        }
+        ci = ci + 1;
+    }
+
+    hui bt = 2;
+    guiCmd(fd, 7, 0, px, py, pw, bt, border_c, "");
+    guiCmd(fd, 7, 0, px, py + ph - bt, pw, bt, border_c, "");
+    guiCmd(fd, 7, 0, px, py + bt, bt, ph - bt * 2, border_c, "");
+    guiCmd(fd, 7, 0, px + pw - bt, py + bt, bt, ph - bt * 2, border_c, "");
+
+    // ---- Filled red circle ----
+    hui cx = W / 4; hui cy = H * 2 / 5;
+    hui red = (255 << 24) | (0xFF << 16) | (0x44 << 8) | 0x44;
+    guiCmd(fd, 9, 0, cx, cy, 45, 0, red, "");
+
+    // ---- Green + blue cross lines ----
+    hui lx = W * 3 / 4; hui ly = H * 2 / 5;
+    hui green = (255 << 24) | (0x44 << 16) | (0xFF << 8) | 0x44;
+    hui blue  = (255 << 24) | (0x44 << 16) | (0x44 << 8) | 0xFF;
+    guiCmd(fd, 8, 0, lx - 50, ly - 50, lx + 50, ly + 50, green, "");
+    guiCmd(fd, 8, 0, lx + 50, ly - 50, lx - 50, ly + 50, blue, "");
+
+    // ---- Horizontal gradient rect ----
+    hui gx = W / 2 - 70; hui gy = H * 3 / 5 - 25;
+    hui c1_grad = (255 << 24) | (0xFF << 16) | (0xFF << 8) | 0x44;
+    hui c2_grad = (255 << 24) | (0xFF << 16) | (0x44 << 8) | 0x44;
+    hui grad_packed = (c2_grad << 32) | c1_grad;
+    guiCmd(fd, 10, 0, gx, gy, 140, 50, grad_packed, "");
+
+    hui white = (255 << 24) | (0xFF << 16) | (0xFF << 8) | 0xFF;
+    guiCmd(fd, 7, 0, gx, gy, 140, 2, white, "");
+    guiCmd(fd, 7, 0, gx, gy + 48, 140, 2, white, "");
+    guiCmd(fd, 7, 0, gx, gy, 2, 50, white, "");
+    guiCmd(fd, 7, 0, gx + 138, gy, 2, 50, white, "");
+
+    // ---- "Hello!" using individual pixel patterns ----
+    hui tx = px + 20; hui ty = py + 20;
+    hui tc = (255 << 24) | (0xFF << 16) | (0xFF << 8) | 0xFF;
+    hui ac = (255 << 24) | (0xFF << 16) | (0xFF << 8) | 0x44;
+
+    // H
+    guiCmd(fd, 6, 0, tx + 0, ty + 0, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 0, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 0, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 0, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 0, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 0, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 0, ty + 6, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 4, ty + 0, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 4, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 4, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 4, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 4, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 4, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 4, ty + 6, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 1, ty + 3, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 2, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 3, ty + 3, 0, 0, tc, "");
+    // e
+    guiCmd(fd, 6, 0, tx + 8, ty + 1, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 9, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 10, ty + 1, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 11, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 8, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 12, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 8, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 8, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 8, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 12, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 12, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 12, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 12, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 11, ty + 5, 0, 0, tc, "");
+    // l
+    guiCmd(fd, 6, 0, tx + 15, ty + 0, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 15, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 15, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 15, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 15, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 15, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 15, ty + 6, 0, 0, tc, "");
+    // l
+    guiCmd(fd, 6, 0, tx + 18, ty + 0, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 18, ty + 1, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 18, ty + 2, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 18, ty + 3, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 18, ty + 4, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 18, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 18, ty + 6, 0, 0, tc, "");
+    // o
+    guiCmd(fd, 6, 0, tx + 23, ty + 1, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 23, ty + 2, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 23, ty + 3, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 23, ty + 4, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 23, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 27, ty + 1, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 27, ty + 2, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 27, ty + 3, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 27, ty + 4, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 27, ty + 5, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 24, ty + 0, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 25, ty + 0, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 26, ty + 0, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 24, ty + 6, 0, 0, tc, ""); guiCmd(fd, 6, 0, tx + 25, ty + 6, 0, 0, tc, "");
+    guiCmd(fd, 6, 0, tx + 26, ty + 6, 0, 0, tc, "");
+    // !
+    guiCmd(fd, 6, 0, tx + 30, ty + 0, 0, 0, ac, ""); guiCmd(fd, 6, 0, tx + 30, ty + 1, 0, 0, ac, "");
+    guiCmd(fd, 6, 0, tx + 30, ty + 2, 0, 0, ac, ""); guiCmd(fd, 6, 0, tx + 30, ty + 3, 0, 0, ac, "");
+    guiCmd(fd, 6, 0, tx + 30, ty + 4, 0, 0, ac, "");
+    guiCmd(fd, 6, 0, tx + 30, ty + 6, 0, 0, ac, "");
+
+    // ---- Frame, wait for close, quit ----
+    guiCmd(fd, 5, 0, 0, 0, 0, 0, 0, "");  // CMD_FRAME
+    guiCmd(fd, 12, 0, 0, 0, 0, 0, 0, ""); // CMD_WAIT
+    guiCmd(fd, 0, 0, 0, 0, 0, 0, 0, "");  // CMD_QUIT
+    return 0;
+}

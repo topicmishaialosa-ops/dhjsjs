@@ -589,6 +589,41 @@ pub const Parser = struct {
                 self.eat();
                 const field = self.tokStr();
                 self.eat();
+                // Check if this is a dotted function call: http.get(...)
+                if (left != NO_NODE and self.pool[@as(usize, @intCast(left))].kind == .ident and self.tokMatch("(")) {
+                    const left_name = self.pool[@as(usize, @intCast(left))].name_start[0..self.pool[@as(usize, @intCast(left))].name_len];
+                    const total_len = left_name.len + 1 + field.len;
+                    if (total_len < 32) {
+                        var combined: [32]u8 = undefined;
+                        @memcpy(combined[0..left_name.len], left_name);
+                        combined[left_name.len] = '.';
+                        @memcpy(combined[left_name.len + 1 ..][0..field.len], field.ptr[0..field.len]);
+                        const buf_start = self.strbuf_off;
+                        if (buf_start + total_len < self.strbuf.len) {
+                            @memcpy(self.strbuf[buf_start..][0..total_len], combined[0..total_len]);
+                            self.strbuf_off = buf_start + total_len;
+                        }
+                        self.eat(); // consume '('
+                        const n = self.allocNode(.call, @as([*]const u8, &self.strbuf) + buf_start, total_len, "", 0, self.tok.line, self.tok.col);
+                        while (!self.tokMatch(")") and self.tok.kind != .eof) {
+                            const arg = self.parseExpr(0);
+                            if (arg != NO_NODE) self.addChild(n, arg);
+                            if (self.tokMatch(",")) { self.eat(); }
+                            else if (!self.tokMatch(")") and self.tok.kind != .eof) {
+                                self.errs.add(.parse_unexpected_token, "expected ')' or ',' in function arguments", self.tok.line, self.tok.col, "add ')' to close the call or ',' to add more arguments");
+                                self.err = true;
+                                break;
+                            }
+                        }
+                        if (self.tokMatch(")")) { self.eat(); }
+                        else {
+                            self.errs.add(.parse_missing_close_paren, "expected ')' after function arguments", self.tok.line, self.tok.col, "add ')' to close function call");
+                            self.err = true;
+                        }
+                        left = n;
+                        continue;
+                    }
+                }
                 const n = self.allocNode(.field_access, field.ptr, field.len, "", 0, self.tok.line, self.tok.col);
                 self.addChild(n, left);
                 left = n;

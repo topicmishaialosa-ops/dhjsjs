@@ -351,12 +351,12 @@ fn compileBinaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]pa
     else if (eq(op, "^")) { cb.xorRR(cg.RAX, cg.RCX); }
     else if (eq(op, "<<")) { cb.shlRcl(cg.RAX); }
     else if (eq(op, ">>")) { cb.shrRcl(cg.RAX); }
-    else if (eq(op, "==")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.sete(cg.RAX); cb.addRImm32(cg.RSP, 16); }
-    else if (eq(op, "!=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setne(cg.RAX); cb.addRImm32(cg.RSP, 16); }
-    else if (eq(op, "<")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setl(cg.RAX); cb.addRImm32(cg.RSP, 16); }
-    else if (eq(op, ">")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setg(cg.RAX); cb.addRImm32(cg.RSP, 16); }
-    else if (eq(op, "<=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setle(cg.RAX); cb.addRImm32(cg.RSP, 16); }
-    else if (eq(op, ">=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setge(cg.RAX); cb.addRImm32(cg.RSP, 16); }
+    else if (eq(op, "==")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.sete(cg.RAX); }
+    else if (eq(op, "!=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setne(cg.RAX); }
+    else if (eq(op, "<")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setl(cg.RAX); }
+    else if (eq(op, ">")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setg(cg.RAX); }
+    else if (eq(op, "<=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setle(cg.RAX); }
+    else if (eq(op, ">=")) { cb.cmpRR(cg.RAX, cg.RCX); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.setge(cg.RAX); }
     else if (eq(op, "&&")) { cb.andRR(cg.RAX, cg.RCX); }
     else if (eq(op, "||")) { cb.orRR(cg.RAX, cg.RCX); }
     else {
@@ -373,7 +373,7 @@ fn compileUnaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]par
     const operand = n.first_child;
     compileExprNode(operand, pool, cb, vars, vc, errs);
     if (eq(op, "-")) { cb.negR(cg.RAX); }
-    else if (eq(op, "!")) { cb.cmpRImm32(cg.RAX, 0); cb.subRImm32(cg.RSP, 16); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.sete(cg.RAX); cb.addRImm32(cg.RSP, 16); }
+    else if (eq(op, "!")) { cb.cmpRImm32(cg.RAX, 0); cb.pushfq(); cb.xorRR(cg.RAX, cg.RAX); cb.popfq(); cb.sete(cg.RAX); }
     else {
         var buf: [128]u8 = undefined;
         const parts = [_][]const u8{ "unknown unary operator '", op, "'" };
@@ -656,6 +656,24 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
             }
         }
         cb.movRImm64(cg.RAX, 8);
+        cb.syscall();
+        return;
+    }
+    if (eq(name, "dup2")) {
+        var oldfd: i64 = 0; var newfd: i64 = 0;
+        var ch = n.first_child;
+        if (ch != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch))];
+            if (cn.kind == .int_lit) oldfd = strToInt(cn.val_start[0..cn.val_len]);
+            ch = cn.next_sibling;
+        }
+        if (ch != parser_mod.NO_NODE) {
+            const cn = &pool[@as(usize, @intCast(ch))];
+            if (cn.kind == .int_lit) newfd = strToInt(cn.val_start[0..cn.val_len]);
+        }
+        cb.movRImm64(cg.RDI, @as(u64, @intCast(oldfd)));
+        cb.movRImm64(cg.RSI, @as(u64, @intCast(newfd)));
+        cb.movRImm64(cg.RAX, 33);
         cb.syscall();
         return;
     }
@@ -1203,7 +1221,440 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.movRImm64(cg.RAX, 0);
         return;
     }
-    if (eq(name, "audioplay")) {
+    if (eq(name, "guiApp") or eq(name, "guiapp")) {
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const gp_parent = cb.pos;
+        cb.jneRel32(0);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const gp_argv0 = "gui_srv\x00";
+        cb.byte(@as(u8, @intCast(gp_argv0.len)));
+        for (gp_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const gp_exe = "./gui_srv\x00";
+        cb.byte(@as(u8, @intCast(gp_exe.len)));
+        for (gp_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R9);
+
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const gp_parent_pos = cb.pos;
+        patch32(cb, gp_parent + 2, @as(i32, @intCast(gp_parent_pos)) - @as(i32, @intCast(gp_parent + 6)));
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 0);
+        cb.movRImm64(cg.R10, 0);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.movRImm64(cg.RAX, 0);
+        return;
+    }
+    if (eq(name, "waitpid")) {
+        var wpid: i64 = -1;
+        const wch = n.first_child;
+        if (wch != parser_mod.NO_NODE) {
+            const wcn = &pool[@as(usize, @intCast(wch))];
+            if (wcn.kind == .int_lit) wpid = strToInt(wcn.val_start[0..wcn.val_len]);
+        }
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRImm64(cg.RDI, @as(u64, @bitCast(wpid)));
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.xorRR(cg.R10, cg.R10);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+        return;
+    }
+    if (eq(name, "guiServer") or eq(name, "guiserver")) {
+        // Read /proc/self/environ → build envp array for child (must be before execve)
+        // Allocate 8KB: 4KB for env data + 4KB for envp pointers (up to 512 vars)
+        cb.subRImm32(cg.RSP, 8192);
+        cb.xorRR(cg.R12, cg.R12); // default NULL envp
+
+        // lea rdi, [rip + "/proc/self/environ\0"]
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const gsv_env_path = "/proc/self/environ\x00";
+        cb.byte(@as(u8, @intCast(gsv_env_path.len)));
+        for (gsv_env_path) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 2); // SYS_OPEN
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const env_skip_fd = cb.pos;
+        cb.jlRel32(0); // jump if fd < 0
+
+        cb.movRR(cg.R14, cg.RAX); // R14 = fd
+        cb.leaRMem(cg.RSI, cg.RSP, 4096); // buf = RSP+4096
+        cb.movRR(cg.RDI, cg.R14);
+        cb.movRImm64(cg.RDX, 4096);
+        cb.xorRR(cg.RAX, cg.RAX); // SYS_READ
+        cb.syscall();
+        cb.movRR(cg.R15, cg.RAX); // R15 = bytes read
+
+        cb.movRR(cg.RDI, cg.R14);
+        cb.movRImm64(cg.RAX, 3); // SYS_CLOSE
+        cb.syscall();
+
+        // Build envp array at RSP (each entry = 8 bytes)
+        cb.movRR(cg.R12, cg.RSP); // R12 = envp base (saved for child)
+        cb.movRR(cg.R14, cg.RSP); // R14 = envp write pointer (advances)
+        cb.leaRMem(cg.RBX, cg.RSP, 4096); // RBX = scan pointer into env data
+
+        // Outer loop: store each string pointer
+        const env_loop = cb.pos;
+        cb.byte(0x49); cb.byte(0x89); cb.byte(0x1E); // mov [r14], rbx
+        cb.addRImm32(cg.R14, 8); // advance envp
+        cb.jmpRel8(0); // → check_null (fwd, patched below)
+        const env_fwd_jmp_pos = cb.pos - 2;
+
+        // scan_next:
+        cb.addRImm32(cg.RBX, 1); // advance scan pointer
+
+        // check_null:
+        const env_check_null = cb.pos;
+        cb.byte(0x80); cb.byte(0x3B); cb.byte(0x00); // cmp byte [rbx], 0
+        cb.jneRel8(0); // → scan_next (bwd, patched below)
+        const env_jne_pos = cb.pos - 2;
+
+        // found null — skip and count
+        cb.addRImm32(cg.RBX, 1); // skip null byte
+        // Check if we've reached the end of data
+        cb.movRR(cg.RAX, cg.RBX);
+        cb.subRR(cg.RAX, cg.RSP);
+        cb.subRImm32(cg.RAX, 4096);
+        cb.cmpRR(cg.RAX, cg.R15);
+        const env_jl_pos = cb.pos;
+        cb.jlRel32(0); // → env_loop (bwd, patched below)
+
+        // Done: NULL terminator for envp
+        cb.xorRR(cg.RAX, cg.RAX);
+        cb.byte(0x49); cb.byte(0x89); cb.byte(0x06); // mov [r14], rax
+
+        const env_done = cb.pos;
+        // Patch jumps
+        patch32(cb, env_jl_pos + 2, @as(i32, @intCast(env_loop)) - @as(i32, @intCast(env_jl_pos + 6)));
+        // jne (backward to scan_next)
+        const env_jne_tgt = env_fwd_jmp_pos + 2; // scan_next is right after the fwd jmp (add 2 for the jmp instruction itself)
+        cb.buf[env_jne_pos + 1] = @as(u8, @bitCast(@as(i8, @intCast(@as(i32, @intCast(env_jne_tgt)) - @as(i32, @intCast(env_jne_pos + 2))))));
+        // jmp (forward to check_null)
+        const env_fwd_tgt = env_check_null;
+        cb.buf[env_fwd_jmp_pos + 1] = @as(u8, @bitCast(@as(i8, @intCast(@as(i32, @intCast(env_fwd_tgt)) - @as(i32, @intCast(env_fwd_jmp_pos + 2))))));
+        // jl (error: skip env setup)
+        patch32(cb, env_skip_fd + 2, @as(i32, @intCast(env_done)) - @as(i32, @intCast(env_skip_fd + 6)));
+
+        // pipe A: parent→child (commands)
+        cb.subRImm32(cg.RSP, 8);
+        cb.movRR(cg.RDI, cg.RSP);
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 22);
+        cb.syscall();
+        cb.popR(cg.R8);              // R8 = pipe_a_read | (pipe_a_write << 32)
+        cb.movRR(cg.R9, cg.R8);
+        cb.shrRImm8(cg.R9, 32);      // R9 = pipe_a_write
+
+        // pipe B: child→parent (results)
+        cb.subRImm32(cg.RSP, 8);
+        cb.movRR(cg.RDI, cg.RSP);
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 22);
+        cb.syscall();
+        cb.popR(cg.R10);             // R10 = pipe_b_read | (pipe_b_write << 32)
+        cb.movRR(cg.R11, cg.R10);
+        cb.shrRImm8(cg.R11, 32);     // R11 = pipe_b_write
+
+        // fork
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const gsv_parent = cb.pos;
+        cb.jneRel32(0);
+
+        // child: dup2(pipe_a_read, 0), dup2(pipe_b_write, 1), close all, exec
+        cb.movRR(cg.RDI, cg.R8);
+        cb.movRImm64(cg.RSI, 0);
+        cb.movRImm64(cg.RAX, 33);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R11);
+        cb.movRImm64(cg.RSI, 1);
+        cb.movRImm64(cg.RAX, 33);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R8);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R9);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R10);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R11);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const gsv_argv0 = "gui_srv\x00";
+        cb.byte(@as(u8, @intCast(gsv_argv0.len)));
+        for (gsv_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const gsv_exe = "./gui_srv\x00";
+        cb.byte(@as(u8, @intCast(gsv_exe.len)));
+        for (gsv_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R9);
+
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.movRR(cg.RDX, cg.R12); // envp = built array (R12=0 = NULL if open failed)
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const gsv_parent_pos = cb.pos;
+        patch32(cb, gsv_parent + 2, @as(i32, @intCast(gsv_parent_pos)) - @as(i32, @intCast(gsv_parent + 6)));
+
+        // parent: close(pipe_a_read), close(pipe_b_write), return (pipe_b_read<<32)|pipe_a_write
+        cb.movRR(cg.RDI, cg.R8);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R11);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.addRImm32(cg.RSP, 8192); // restore stack (was sub'd for envp)
+        cb.movRR(cg.RAX, cg.R10);
+        cb.shlRImm8(cg.RAX, 32);
+        cb.orRR(cg.RAX, cg.R9);
+        return;
+    }
+    if (eq(name, "guiCmd") or eq(name, "guicmd")) {
+        var gv: [8]i64 = .{0} ** 8;
+        var label_buf: [32]u8 = .{0} ** 32;
+        var fd_is_expr = false;
+        var fd_expr_node: parser_mod.NodeIdx = parser_mod.NO_NODE;
+        var is_expr: [8]bool = .{false} ** 8;
+        var expr_nodes: [8]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 8;
+        var expr_order: [7]usize = .{0} ** 7;
+        var expr_count: usize = 0;
+
+        var arg_idx: usize = 0;
+        var ch = n.first_child;
+        while (ch != parser_mod.NO_NODE and arg_idx < 9) : (arg_idx += 1) {
+            const cn = &pool[@as(usize, @intCast(ch))];
+            if (arg_idx < 8) {
+                if (cn.kind == .int_lit) {
+                    gv[arg_idx] = strToInt(cn.val_start[0..cn.val_len]);
+                } else if (arg_idx == 0) {
+                    fd_is_expr = true;
+                    fd_expr_node = ch;
+                } else {
+                    is_expr[arg_idx] = true;
+                    expr_nodes[arg_idx] = ch;
+                    expr_order[expr_count] = arg_idx;
+                    expr_count += 1;
+                }
+            } else {
+                if (cn.kind == .str_lit) {
+                    var i: usize = 0;
+                    while (i < 32 and i < cn.val_len) : (i += 1) {
+                        label_buf[i] = cn.val_start[i];
+                    }
+                }
+            }
+            ch = cn.next_sibling;
+        }
+
+        cb.subRImm32(cg.RSP, 64);
+
+        // Write label at offset 29 (4 x 8 bytes)
+        var li: usize = 0;
+        while (li < 4) : (li += 1) {
+            var q: u64 = 0;
+            var bi: usize = 0;
+            while (bi < 8) : (bi += 1) {
+                const idx = li * 8 + bi;
+                q |= (@as(u64, if (idx < 32) label_buf[idx] else 0)) << @as(u6, @intCast(bi * 8));
+            }
+            cb.movRImm64(cg.RAX, q);
+            cb.movMemR64(cg.RSP, @as(i32, @intCast(29 + li * 8)), cg.RAX);
+        }
+
+        // Compile expression args (indices 1..7) and push in order
+        {
+            var ei: usize = 0;
+            while (ei < expr_count) : (ei += 1) {
+                compileExprNode(expr_nodes[expr_order[ei]], pool, cb, vars, vc, errs);
+                cb.pushR(cg.RAX);
+            }
+        }
+
+        // Write constant values for args 1..7 (low to high offset)
+        // type must be written before id to handle 4-byte overlap at offset 0
+        if (!is_expr[1]) cb.movImm32RSP(0, @as(u32, @intCast(@as(u8, @intCast(gv[1])))));  // type @ 0
+        if (!is_expr[2]) cb.movImm32RSP(1, @as(u32, @bitCast(@as(i32, @intCast(gv[2])))));  // id @ 1
+        if (!is_expr[3]) cb.movImm32RSP(5, @as(u32, @bitCast(@as(i32, @intCast(gv[3])))));  // x @ 5
+        if (!is_expr[4]) cb.movImm32RSP(9, @as(u32, @bitCast(@as(i32, @intCast(gv[4])))));  // y @ 9
+        if (!is_expr[5]) cb.movImm32RSP(13, @as(u32, @bitCast(@as(i32, @intCast(gv[5]))))); // w @ 13
+        if (!is_expr[6]) cb.movImm32RSP(17, @as(u32, @bitCast(@as(i32, @intCast(gv[6]))))); // h @ 17
+        if (!is_expr[7]) {
+            const val_u64 = @as(u64, @bitCast(gv[7]));
+            cb.movRImm64(cg.RAX, val_u64);
+            cb.movMemR64(cg.RSP, 21, cg.RAX);  // val @ 21
+        }
+
+        // Pop expression values in reverse order and write to struct
+        {
+            var pi: usize = expr_count;
+            while (pi > 0) {
+                pi -= 1;
+                const ea = expr_order[pi];
+                cb.popR(cg.RAX);
+                if (ea == 7) {
+                    cb.movMemR64(cg.RSP, 21, cg.RAX);  // val @ 21
+                } else if (ea == 1) {
+                    cb.byte(0x88); cb.byte(0x44); cb.byte(0x24); cb.byte(0x00); // mov [rsp+0], al
+                } else {
+                    const off: i32 = if (ea == 2) 1 else if (ea == 3) 5 else if (ea == 4) 9 else if (ea == 5) 13 else 17;
+                    cb.movMemR32(cg.RSP, off, cg.RAX);
+                }
+            }
+        }
+
+        // Set up write syscall using fd (expression or constant)
+        if (fd_is_expr) {
+            compileExprNode(fd_expr_node, pool, cb, vars, vc, errs);
+            cb.byte(0x89); cb.byte(0xC7); // mov edi, eax (32-bit, zero-extends → correct fd)
+        } else {
+            cb.movRImm64(cg.RDI, @as(u64, @intCast(gv[0])));
+        }
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 61);
+        cb.movRImm64(cg.RAX, 1);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 64);
+        return;
+      }
+      if (eq(name, "setTheme")) {
+         // setTheme(fd, theme_id) -> sends CMD_SET_THEME to gui_srv
+         // fd: file descriptor to write to (gui_srv write end from guiServer)
+         // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light
+         var gv: [8]i64 = .{0} ** 8;
+         var is_expr: [8]bool = .{false} ** 8;
+         var expr_nodes: [8]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 8;
+         var expr_order: [7]usize = .{0} ** 7;
+         var expr_count: usize = 0;
+
+         var arg_idx: usize = 0;
+         var ch = n.first_child;
+         while (ch != parser_mod.NO_NODE and arg_idx < 2) : (arg_idx += 1) {
+             const cn = &pool[@as(usize, @intCast(ch))];
+             if (cn.kind == .int_lit) {
+                 gv[arg_idx] = strToInt(cn.val_start[0..cn.val_len]);
+             } else {
+                 is_expr[arg_idx] = true;
+                 expr_nodes[arg_idx] = ch;
+                 expr_order[expr_count] = arg_idx;
+                 expr_count += 1;
+             }
+             ch = cn.next_sibling;
+         }
+
+         cb.subRImm32(cg.RSP, 64);
+
+         // Write label (empty string) at offset 29 (4 x 8 bytes of 0)
+         var li: usize = 0;
+         while (li < 4) : (li += 1) {
+             cb.movRImm64(cg.RAX, 0);
+             cb.movMemR64(cg.RSP, @as(i32, @intCast(29 + li * 8)), cg.RAX);
+         }
+
+         // Compile expression args (fd at index 0, theme_id at index 1)
+         {
+             var ei: usize = 0;
+             while (ei < expr_count) : (ei += 1) {
+                 compileExprNode(expr_nodes[expr_order[ei]], pool, cb, vars, vc, errs);
+                 cb.pushR(cg.RAX);
+             }
+         }
+
+         // Write constant values for args 0..7
+         // fd @ offset 0 is handled specially below (used for syscall)
+         // type @ offset 0
+         cb.movImm32RSP(0, @as(u32, 13));  // CMD_SET_THEME = 13
+         // id @ offset 1 (theme_id)
+         if (!is_expr[1]) cb.movImm32RSP(1, @as(u32, @bitCast(@as(i32, @intCast(gv[1])))));  // id @ 1
+         // x @ offset 5
+         cb.movImm32RSP(5, 0);  // unused
+         // y @ offset 9
+         cb.movImm32RSP(9, 0);  // unused
+         // w @ offset 13
+         cb.movImm32RSP(13, 0); // unused
+         // h @ offset 17
+         cb.movImm32RSP(17, 0); // unused
+         // val @ offset 21
+         cb.movRImm64(cg.RAX, 0);
+         cb.movMemR64(cg.RSP, 21, cg.RAX);  // unused
+
+         // Pop expression values in reverse order and write to struct
+         {
+             var pi: usize = expr_count;
+             while (pi > 0) {
+                 pi -= 1;
+                 const ea = expr_order[pi];
+                 cb.popR(cg.RAX);
+                 if (ea == 0) {
+                     // fd -> will be used for syscall, don't write to struct
+                 } else if (ea == 1) {
+                     // theme_id -> id field at offset 1
+                     cb.movMemR32(cg.RSP, 1, cg.RAX);
+                 }
+             }
+         }
+
+         // Set up write syscall using fd (expression or constant)
+         if (is_expr[0]) {
+             compileExprNode(expr_nodes[expr_order[0]], pool, cb, vars, vc, errs);
+             cb.byte(0x89); cb.byte(0xC7); // mov edi, eax
+         } else {
+             cb.movRImm64(cg.RDI, @as(u64, @intCast(gv[0])));
+         }
+         cb.leaRMem(cg.RSI, cg.RSP, 0);
+         cb.movRImm64(cg.RDX, 61);
+         cb.movRImm64(cg.RAX, 1);
+         cb.syscall();
+         cb.addRImm32(cg.RSP, 64);
+         return;
+      }
+      if (eq(name, "audioplay")) {
         const ch = n.first_child;
         if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
@@ -1719,6 +2170,481 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         patch32(cb, rect_y_done + 2, @as(i32, @intCast(rect_y_end)) - @as(i32, @intCast(rect_y_done + 6)));
 
         cb.movRImm64(cg.RAX, 0);
+        return;
+     }
+     if (eq(name, "android_touch_count")) {
+         cb.movRImm64(cg.RDI, 0x200100 + 164);
+         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_touch_x_index")) {
+         // android_touch_x_index(index) -> f32
+         var aargs: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+         var ac: usize = 0;
+         var achild = n.first_child;
+         while (achild != parser_mod.NO_NODE and ac < 1) {
+             aargs[ac] = achild;
+             achild = pool[@as(usize, @intCast(achild))].next_sibling;
+             ac += 1;
+         }
+         if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+         cb.pushR(cg.RAX); // index
+         cb.popR(cg.R8);   // R8 = index
+         // compute offset = 168 + index*4
+         cb.movRImm64(cg.R9, 4);
+         cb.imulRR(cg.R9, cg.R8); // R9 = index*4
+         cb.movRImm64(cg.RDI, 0x200100 + 168);
+         cb.addRR(cg.RDI, cg.R9); // RDI = address
+         cb.movRMem64(cg.RAX, cg.RDI, 0); // load f32 bits
+         return;
+     }
+     if (eq(name, "android_touch_y_index")) {
+         var aargs: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+         var ac: usize = 0;
+         var achild = n.first_child;
+         while (achild != parser_mod.NO_NODE and ac < 1) {
+             aargs[ac] = achild;
+             achild = pool[@as(usize, @intCast(achild))].next_sibling;
+             ac += 1;
+         }
+         if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+         cb.pushR(cg.RAX); // index
+         cb.popR(cg.R8);
+         cb.movRImm64(cg.R9, 4);
+         cb.imulRR(cg.R9, cg.R8);
+         cb.movRImm64(cg.RDI, 0x200100 + 232);
+         cb.addRR(cg.RDI, cg.R9);
+         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_touch_down_index")) {
+         var aargs: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+         var ac: usize = 0;
+         var achild = n.first_child;
+         while (achild != parser_mod.NO_NODE and ac < 1) {
+             aargs[ac] = achild;
+             achild = pool[@as(usize, @intCast(achild))].next_sibling;
+             ac += 1;
+         }
+         if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+         cb.pushR(cg.RAX);
+         cb.popR(cg.R8);
+         cb.movRImm64(cg.R9, 4);
+         cb.imulRR(cg.R9, cg.R8);
+         cb.movRImm64(cg.RDI, 0x200100 + 296);
+         cb.addRR(cg.RDI, cg.R9);
+         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_touch_id_index")) {
+         var aargs: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+         var ac: usize = 0;
+         var achild = n.first_child;
+         while (achild != parser_mod.NO_NODE and ac < 1) {
+             aargs[ac] = achild;
+             achild = pool[@as(usize, @intCast(achild))].next_sibling;
+             ac += 1;
+         }
+         if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+         cb.pushR(cg.RAX);
+         cb.popR(cg.R8);
+         cb.movRImm64(cg.R9, 4);
+         cb.imulRR(cg.R9, cg.R8);
+         cb.movRImm64(cg.RDI, 0x200100 + 360);
+         cb.addRR(cg.RDI, cg.R9);
+         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "resolve") or eq(name, "resolve_hostname")) {
+        // resolve(hostname_ptr) → u32 ip (fork+exec http_client resolve hostname)
+        const rch = n.first_child;
+        if (rch != parser_mod.NO_NODE) { compileExprNode(rch, pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // hostname ptr
+
+        // Create pipe to read result
+        cb.subRImm32(cg.RSP, 8);
+        cb.movRR(cg.RDI, cg.RSP);
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
+        cb.syscall();
+        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
+        cb.movRR(cg.R13, cg.R12);
+        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
+
+        // fork
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const res_parent = cb.pos;
+        cb.jneRel32(0);
+
+        // child
+        cb.movRR(cg.RDI, cg.R12); // close pipe_read
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13); // dup2(pipe_write, 1)
+        cb.movRImm64(cg.RSI, 1);
+        cb.movRImm64(cg.RAX, 33);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13); // close pipe_write
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.popR(cg.R8); // hostname ptr
+
+        // argv[2] = host, argv[1] = "resolve", argv[0] = "http_client"
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX); // argv[3] = NULL
+        cb.pushR(cg.R8);  // argv[2] = hostname
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const res_str = "resolve\x00";
+        cb.byte(@as(u8, @intCast(res_str.len)));
+        for (res_str) |c| cb.byte(c);
+        cb.pushR(cg.RAX); // argv[1] = "resolve"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const res_argv0 = "http_client\x00";
+        cb.byte(@as(u8, @intCast(res_argv0.len)));
+        for (res_argv0) |c| cb.byte(c);
+        cb.pushR(cg.RAX);
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const res_exe = "./http_client\x00";
+        cb.byte(@as(u8, @intCast(res_exe.len)));
+        for (res_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const res_parent_pos = cb.pos;
+        patch32(cb, res_parent + 2, @as(i32, @intCast(res_parent_pos)) - @as(i32, @intCast(res_parent + 6)));
+
+        // parent: close pipe_write, read 4 bytes from pipe_read
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        // Read result
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.R12);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.movRImm64(cg.RDX, 4);
+        cb.xorRR(cg.RAX, cg.RAX);
+        cb.syscall();
+
+        // Close pipe_read
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        // Wait for child
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.xorRR(cg.R10, cg.R10);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        // Read IP from stack buffer
+        cb.xorRR(cg.RAX, cg.RAX);
+        cb.byte(0x8A); cb.byte(0x04); cb.byte(0x24); // mov al, [rsp]
+        cb.movRR(cg.R8, cg.RAX);
+        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x01); // mov al, [rsp+1]
+        cb.shlRImm8(cg.RAX, 8);
+        cb.orRR(cg.R8, cg.RAX);
+        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x02); // mov al, [rsp+2]
+        cb.shlRImm8(cg.RAX, 16);
+        cb.orRR(cg.R8, cg.RAX);
+        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x03); // mov al, [rsp+3]
+        cb.shlRImm8(cg.RAX, 24);
+        cb.orRR(cg.R8, cg.RAX);
+
+        cb.addRImm32(cg.RSP, 16 + 8); // pop buffer + hostname ptr
+        cb.movRR(cg.RAX, cg.R8);
+        return;
+    }
+    if (eq(name, "http.get") or eq(name, "http_get") or eq(name, "httpget")) {
+        // http.get(host_ptr, path_ptr) → returns response string pointer
+        var hg_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+        var hg_ac: usize = 0;
+        var hg_ch = n.first_child;
+        while (hg_ch != parser_mod.NO_NODE and hg_ac < 2) {
+            hg_args[hg_ac] = hg_ch;
+            hg_ch = pool[@as(usize, @intCast(hg_ch))].next_sibling;
+            hg_ac += 1;
+        }
+        if (hg_args[0] != parser_mod.NO_NODE) { compileExprNode(hg_args[0], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // host
+        if (hg_args[1] != parser_mod.NO_NODE) { compileExprNode(hg_args[1], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // path
+
+        // pipe + buffer setup (save args in regs first)
+        cb.subRImm32(cg.RSP, 8);
+        cb.movRR(cg.RDI, cg.RSP);
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
+        cb.syscall();
+        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
+        cb.movRR(cg.R13, cg.R12);
+        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
+
+        // save args in regs (path on top, host below)
+        cb.popR(cg.R9);  // R9 = path
+        cb.popR(cg.R8);  // R8 = host
+
+        // allocate response buffer
+        cb.subRImm32(cg.RSP, 8192);
+        cb.movRR(cg.R14, cg.RSP); // R14 = buffer
+
+        // fork
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const hg_parent = cb.pos;
+        cb.jneRel32(0);
+
+        // child: close pipe_read, dup2(pipe_write, 1)
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RSI, 1);
+        cb.movRImm64(cg.RAX, 33);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        // args already in R8(host), R9(path)
+        // argv[4] = NULL, argv[3] = path, argv[2] = host
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R9);
+        cb.pushR(cg.R8);
+        // argv[1] = "GET"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hg_get = "GET\x00";
+        cb.byte(@as(u8, @intCast(hg_get.len)));
+        for (hg_get) |c| cb.byte(c);
+        cb.pushR(cg.RAX);
+        // argv[0] = "http_client"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hg_argv0 = "http_client\x00";
+        cb.byte(@as(u8, @intCast(hg_argv0.len)));
+        for (hg_argv0) |c| cb.byte(c);
+        cb.pushR(cg.RAX);
+        // exe = "./http_client"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hg_exe = "./http_client\x00";
+        cb.byte(@as(u8, @intCast(hg_exe.len)));
+        for (hg_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const hg_parent_pos = cb.pos;
+        patch32(cb, hg_parent + 2, @as(i32, @intCast(hg_parent_pos)) - @as(i32, @intCast(hg_parent + 6)));
+
+        // parent: close pipe_write, read response
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.xorRR(cg.R15, cg.R15);
+        const hg_read_loop = cb.pos;
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRR(cg.RSI, cg.R14);
+        cb.addRR(cg.RSI, cg.R15);
+        cb.movRImm64(cg.RDX, 4096);
+        cb.xorRR(cg.RAX, cg.RAX);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const hg_read_done = cb.pos;
+        cb.jleRel32(0);
+        cb.addRR(cg.R15, cg.RAX);
+        cb.cmpRImm32(cg.R15, 8192);
+        const hg_read_full = cb.pos;
+        cb.jlRel32(0);
+
+        const hg_read_done_lbl = cb.pos;
+        patch32(cb, hg_read_done + 2, @as(i32, @intCast(hg_read_done_lbl)) - @as(i32, @intCast(hg_read_done + 6)));
+        patch32(cb, hg_read_full + 2, @as(i32, @intCast(hg_read_loop)) - @as(i32, @intCast(hg_read_full + 6)));
+
+        cb.movRR(cg.RAX, cg.R14);
+        cb.addRR(cg.RAX, cg.R15);
+        cb.byte(0xC6); cb.byte(0x00); cb.byte(0x00);
+
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.xorRR(cg.R10, cg.R10);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.movRR(cg.RAX, cg.R14);
+        cb.addRImm32(cg.RSP, 8192 + 8 + 16);
+        return;
+    }
+    if (eq(name, "http.post") or eq(name, "http_post") or eq(name, "httppost") or eq(name, "http.post")) {
+        // http.post(host_ptr, path_ptr, body_ptr) → returns response string pointer
+        var hp_args: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
+        var hp_ac: usize = 0;
+        var hp_ch = n.first_child;
+        while (hp_ch != parser_mod.NO_NODE and hp_ac < 3) {
+            hp_args[hp_ac] = hp_ch;
+            hp_ch = pool[@as(usize, @intCast(hp_ch))].next_sibling;
+            hp_ac += 1;
+        }
+        if (hp_args[0] != parser_mod.NO_NODE) { compileExprNode(hp_args[0], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // host (deepest)
+        if (hp_args[1] != parser_mod.NO_NODE) { compileExprNode(hp_args[1], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // path
+        if (hp_args[2] != parser_mod.NO_NODE) { compileExprNode(hp_args[2], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX); // body (top)
+
+        // Allocate pipe and stack buffer
+        cb.subRImm32(cg.RSP, 8);
+        cb.movRR(cg.RDI, cg.RSP);
+        cb.xorRR(cg.RSI, cg.RSI);
+        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
+        cb.syscall();
+        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
+        cb.movRR(cg.R13, cg.R12);
+        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
+
+        // save args in regs (body on top, path below, host deepest)
+        cb.popR(cg.R10); // R10 = body
+        cb.popR(cg.R9);  // R9 = path
+        cb.popR(cg.R8);  // R8 = host
+
+        cb.subRImm32(cg.RSP, 8192); // response buffer
+        cb.movRR(cg.R14, cg.RSP);
+
+        // fork
+        cb.movRImm64(cg.RAX, 57);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const hp_parent = cb.pos;
+        cb.jneRel32(0);
+
+        // child: setup pipes, exec http_client POST
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RSI, 1);
+        cb.movRImm64(cg.RAX, 33);
+        cb.syscall();
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        // args already in R8(host), R9(path), R10(body)
+
+        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+        cb.pushR(cg.R10);
+        cb.pushR(cg.R9);
+        cb.pushR(cg.R8);
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hp_post = "POST\x00";
+        cb.byte(@as(u8, @intCast(hp_post.len)));
+        for (hp_post) |c| cb.byte(c);
+        cb.pushR(cg.RAX);
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hp_argv0 = "http_client\x00";
+        cb.byte(@as(u8, @intCast(hp_argv0.len)));
+        for (hp_argv0) |c| cb.byte(c);
+        cb.movRR(cg.R9, cg.RAX);
+        cb.pushR(cg.R9); // argv[0] = "http_client"
+        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+        cb.dword(2); cb.byte(0xEB);
+        const hp_exe = "./http_client\x00";
+        cb.byte(@as(u8, @intCast(hp_exe.len)));
+        for (hp_exe) |c| cb.byte(c);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.movRR(cg.RSI, cg.RSP);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.movRImm64(cg.RAX, 59);
+        cb.syscall();
+        cb.movRImm64(cg.RDI, 1);
+        cb.movRImm64(cg.RAX, 60);
+        cb.syscall();
+
+        const hp_parent_pos = cb.pos;
+        patch32(cb, hp_parent + 2, @as(i32, @intCast(hp_parent_pos)) - @as(i32, @intCast(hp_parent + 6)));
+
+        // parent: close pipe_write, read
+        cb.movRR(cg.RDI, cg.R13);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.xorRR(cg.R15, cg.R15);
+        const hp_read_loop = cb.pos;
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRR(cg.RSI, cg.R14);
+        cb.addRR(cg.RSI, cg.R15);
+        cb.movRImm64(cg.RDX, 4096);
+        cb.xorRR(cg.RAX, cg.RAX);
+        cb.syscall();
+        cb.cmpRImm32(cg.RAX, 0);
+        const hp_read_done = cb.pos;
+        cb.jleRel32(0);
+        cb.addRR(cg.R15, cg.RAX);
+        cb.cmpRImm32(cg.R15, 8192);
+        const hp_read_full = cb.pos;
+        cb.jlRel32(0);
+
+        const hp_read_done_lbl = cb.pos;
+        patch32(cb, hp_read_done + 2, @as(i32, @intCast(hp_read_done_lbl)) - @as(i32, @intCast(hp_read_done + 6)));
+        patch32(cb, hp_read_full + 2, @as(i32, @intCast(hp_read_loop)) - @as(i32, @intCast(hp_read_full + 6)));
+
+        cb.movRR(cg.RAX, cg.R14);
+        cb.addRR(cg.RAX, cg.R15);
+        cb.byte(0xC6); cb.byte(0x00); cb.byte(0x00);
+
+        cb.movRR(cg.RDI, cg.R12);
+        cb.movRImm64(cg.RAX, 3);
+        cb.syscall();
+
+        cb.subRImm32(cg.RSP, 16);
+        cb.movRR(cg.RDI, cg.RAX);
+        cb.leaRMem(cg.RSI, cg.RSP, 0);
+        cb.xorRR(cg.RDX, cg.RDX);
+        cb.xorRR(cg.R10, cg.R10);
+        cb.movRImm64(cg.RAX, 61);
+        cb.syscall();
+        cb.addRImm32(cg.RSP, 16);
+
+        cb.movRR(cg.RAX, cg.R14);
+        cb.addRImm32(cg.RSP, 8192 + 4 + 24); // buffer + pipe_fds + 3 args
         return;
     }
     cb.movRImm64(cg.RAX, 0);

@@ -103,6 +103,7 @@ pub fn main() void {
     var mouse_down = false;
     var mouse_clicked = false;
     var mouse_released = false;
+    var scroll_delta: i32 = 0;
     var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
     var volume: f32 = 0.8;
@@ -114,6 +115,7 @@ pub fn main() void {
     while (running) {
         mouse_clicked = false;
         mouse_released = false;
+        scroll_delta = 0;
 
         while (disp.pollEvent()) |event| {
             switch (event) {
@@ -161,6 +163,7 @@ pub fn main() void {
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
+                .scroll => |s| { scroll_delta += s.dy; },
             }
         }
 
@@ -170,7 +173,7 @@ pub fn main() void {
             .mouse_down = mouse_down,
             .mouse_clicked = mouse_clicked,
             .mouse_released = mouse_released,
-            .scroll = 0,
+            .scroll = scroll_delta,
             .keys = key_state,
             .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
             .text_input = [_]u8{0} ** 16,

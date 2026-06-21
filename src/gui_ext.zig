@@ -83,16 +83,27 @@ pub const ImageDisplay = struct {
 };
 
 pub fn drawProgressBar(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, value: f32, track_color: u32, fill_color: u32, border_color: u32) void {
-    fillRect(fb, x, y, w, h, track_color);
-    const fill_w: u32 = @intCast(@max(0, @min(w, @as(u32, @intFromFloat(@as(f64, value) * @as(f64, w))))));
+    const r: u8 = @as(u8, @intCast(@min(@as(u32, 5), @min(w, h) / 2)));
+    gui.fillRoundedRect(fb, x, y, w, h, r, gui.darkenColor(track_color, 18));
+    if (w > 4 and h > 4) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(track_color, 22));
+    }
+    const v = @min(@as(f32, 1.0), @max(@as(f32, 0.0), value));
+    const fill_w: u32 = @intCast(@max(0, @min(w, @as(u32, @intFromFloat(@as(f64, v) * @as(f64, @floatFromInt(w)))))));
     if (fill_w > 0) {
-        fillRect(fb, x, y, fill_w, h, fill_color);
+        gui.fillRoundedRect(fb, x, y, fill_w, h, r, fill_color);
+        if (fill_w > 4 and h > 4) {
+            fillRect(fb, x + 1, y + 1, fill_w - 2, 1, gui.lightenColor(fill_color, 28));
+        }
     }
     drawRectBorder(fb, x, y, w, h, border_color);
 }
 
 pub fn drawTabBar(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, tabs: *TabBar, style: *const gui.Style, mouse_x: i32, mouse_y: i32, clicked: bool) usize {
-    fillRect(fb, x, y, w, h, style.panel_bg);
+    gui.fillRoundedRect(fb, x, y, w, h, style.rounding, style.panel_bg);
+    if (w > 4 and h > 4) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(style.panel_bg, 20));
+    }
     drawRectBorder(fb, x, y, w, h, style.border);
 
     const tab_w = if (tabs.tab_count > 0) w / @as(u32, @intCast(tabs.tab_count)) else w;
@@ -106,15 +117,22 @@ pub fn drawTabBar(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, tabs: *T
         const hovered = mouse_x >= tx and mouse_x < tx + @as(i32, @intCast(tw)) and
             mouse_y >= y and mouse_y < y + @as(i32, @intCast(h));
 
-        const bg = if (i == tabs.active_tab) style.accent
+        const active = i == tabs.active_tab;
+        const bg = if (active) gui.mixColor(style.header_bg, style.accent, 120)
             else if (hovered) style.button_hover
             else style.button_bg;
 
-        fillRect(fb, tx, y, tw, h, bg);
+        gui.fillRoundedRect(fb, tx, y + 2, tw, h -| 2, style.rounding, bg);
+        if (tw > 6 and h > 8) {
+            fillRect(fb, tx + 1, y + 3, tw - 2, 1, gui.lightenColor(bg, 24));
+            if (active) {
+                fillRect(fb, tx + 2, y + @as(i32, @intCast(h)) - 3, tw - 4, 2, style.accent_hover);
+            }
+        }
         drawRectBorder(fb, tx, y, tw, h, style.border);
 
         const label = tabs.tabs[i].label[0..tabs.tabs[i].label_len];
-        drawText(fb, label, tx + 4, y + 4, if (i == tabs.active_tab) style.text else style.text_dim, 8);
+        drawText(fb, label, tx + 6, y + 5, if (active or hovered) style.text else style.text_dim, 8);
 
         if (hovered and clicked) {
             tabs.active_tab = i;
@@ -127,17 +145,21 @@ pub fn drawComboBox(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, combo:
     const is_hovered = mouse_x >= x and mouse_x < x + @as(i32, @intCast(w)) and
         mouse_y >= y and mouse_y < y + @as(i32, @intCast(h));
 
-    const bg = if (is_hovered) style.button_hover else style.input_bg;
-    fillRect(fb, x, y, w, h, bg);
-    drawRectBorder(fb, x, y, w, h, style.input_border);
+    const bg = if (combo.open) gui.lightenColor(style.input_bg, 20) else if (is_hovered) gui.lightenColor(style.input_bg, 14) else style.input_bg;
+    gui.fillRoundedRect(fb, x, y, w, h, style.rounding, bg);
+    if (w > 24 and h > 4) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(bg, 24));
+        fillRect(fb, x + @as(i32, @intCast(w)) - 20, y + 2, 1, h - 4, style.separator);
+    }
+    drawRectBorder(fb, x, y, w, h, if (combo.open) style.accent else if (is_hovered) style.border else style.input_border);
 
     if (combo.selected < combo.item_count) {
         const label = combo.items[combo.selected].label[0..combo.items[combo.selected].label_len];
-        drawText(fb, label, x + 4, y + 4, style.input_text, 8);
+        drawText(fb, label, x + 6, y + 4, style.input_text, 8);
     }
 
     const arrow_x = x + @as(i32, @intCast(w)) - 16;
-    drawText(fb, "v", arrow_x, y + 4, style.text_dim, 8);
+    drawText(fb, "v", arrow_x, y + 4, if (combo.open) style.accent else style.text_dim, 8);
 
     if (is_hovered and clicked) {
         combo.open = !combo.open;
@@ -146,7 +168,8 @@ pub fn drawComboBox(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, combo:
     if (combo.open) {
         const drop_y = y + @as(i32, @intCast(h)) + 2;
         const drop_h = @as(u32, @intCast(combo.item_count)) * (h + 2);
-        fillRect(fb, x, drop_y, w, drop_h, style.input_bg);
+        gui.drawShadow(fb, x, drop_y, w, drop_h, style.shadow, style.rounding);
+        gui.fillRoundedRect(fb, x, drop_y, w, drop_h, style.rounding, style.input_bg);
         drawRectBorder(fb, x, drop_y, w, drop_h, style.input_border);
 
         var di: usize = 0;
@@ -156,11 +179,12 @@ pub fn drawComboBox(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, combo:
             const i_hovered = mouse_x >= x and mouse_x < x + @as(i32, @intCast(w)) and
                 mouse_y >= iy and mouse_y < iy + @as(i32, @intCast(ih));
 
-            if (i_hovered) {
-                fillRect(fb, x + 1, iy, w - 2, ih, style.button_hover);
+            if (i_hovered or di == combo.selected) {
+                fillRect(fb, x + 1, iy, w - 2, ih, if (di == combo.selected) gui.mixColor(style.panel_bg, style.accent, 95) else style.button_hover);
+                if (di == combo.selected) fillRect(fb, x + 1, iy, 3, ih, style.accent_hover);
             }
             const label = combo.items[di].label[0..combo.items[di].label_len];
-            drawText(fb, label, x + 4, iy + 4, style.input_text, 8);
+            drawText(fb, label, x + 6, iy + 4, style.input_text, 8);
 
             if (i_hovered and clicked) {
                 combo.selected = di;
@@ -184,14 +208,20 @@ pub fn drawRadioButton(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, _gr
     const cy = y + @divTrunc(@as(i32, @intCast(h)), 2);
     const r: i32 = 6;
 
-    drawCircle(fb, cx, cy, r, if (is_hovered) style.accent else style.border);
+    drawCircle(fb, cx, cy, r + 2, style.panel_bg);
+    drawCircle(fb, cx, cy, r + 1, if (is_hovered) style.accent else style.border);
+    drawCircle(fb, cx, cy, r - 1, style.check_bg);
     if (selected.* == value) {
-        drawCircle(fb, cx, cy, 3, style.accent);
+        drawCircle(fb, cx, cy, 4, style.accent);
+        drawCircle(fb, cx, cy, 2, style.accent_hover);
     }
 }
 
 pub fn drawTreeView(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, tree: *TreeView, style: *const gui.Style, mouse_x: i32, mouse_y: i32, clicked: bool) void {
-    fillRect(fb, x, y, w, h, style.panel_bg);
+    gui.fillRoundedRect(fb, x, y, w, h, style.rounding, style.panel_bg);
+    if (w > 4 and h > 4) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(style.panel_bg, 18));
+    }
     drawRectBorder(fb, x, y, w, h, style.border);
 
     const row_h: i32 = 22;
@@ -210,11 +240,11 @@ pub fn drawTreeView(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, tree: 
         const is_hovered = mouse_x >= x and mouse_x < x + @as(i32, @intCast(w)) and
             mouse_y >= cy and mouse_y < cy + row_h;
 
-        if (is_hovered) {
-            fillRect(fb, x + 1, cy, w - 2, @as(u32, @intCast(row_h)), style.button_hover);
-        }
         if (node.selected) {
-            fillRect(fb, x + 1, cy, w - 2, @as(u32, @intCast(row_h)), style.accent);
+            fillRect(fb, x + 1, cy, w - 2, @as(u32, @intCast(row_h)), gui.mixColor(style.panel_bg, style.accent, 115));
+            fillRect(fb, x + 1, cy, 3, @as(u32, @intCast(row_h)), style.accent_hover);
+        } else if (is_hovered) {
+            fillRect(fb, x + 1, cy, w - 2, @as(u32, @intCast(row_h)), style.button_hover);
         }
 
         if (node.has_children) {
@@ -223,7 +253,7 @@ pub fn drawTreeView(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, tree: 
         }
 
         const label = node.label[0..node.label_len];
-        drawText(fb, label, nx + 12, cy + 3, style.text, 8);
+        drawText(fb, label, nx + 12, cy + 3, if (node.selected or is_hovered) style.text else style.text_dim, 8);
 
         if (is_hovered and clicked) {
             if (node.has_children) {
@@ -249,8 +279,10 @@ pub fn drawScrollArea(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, scro
         const denom = @as(i32, @intCast(scroll.content_h - h));
         const bar_y: i32 = if (denom > 0) y + @divTrunc(@as(i32, @intCast(h - bar_h)) * scroll.scroll_y, denom) else y;
 
-        fillRect(fb, x + @as(i32, @intCast(w)) - 8, y, 8, h, style.panel_bg);
-        fillRect(fb, x + @as(i32, @intCast(w)) - 8, bar_y, 8, bar_h, style.slider_thumb);
+        const sx = x + @as(i32, @intCast(w)) - 10;
+        gui.fillRoundedRect(fb, sx, y + 2, 8, h -| 4, 4, gui.darkenColor(style.scrollbar_bg, 16));
+        gui.fillRoundedRect(fb, sx + 1, bar_y, 6, bar_h, 3, style.scrollbar_thumb);
+        if (bar_h > 4) fillRect(fb, sx + 2, bar_y + 1, 4, 1, gui.lightenColor(style.scrollbar_thumb, 30));
     } else {
         scroll.scrollbar_visible = false;
         scroll.scroll_y = 0;
@@ -261,7 +293,11 @@ pub fn drawScrollArea(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, scro
 }
 
 pub fn drawMenuBar(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, bar: *MenuBar, style: *const gui.Style, mouse_x: i32, mouse_y: i32, clicked: bool) void {
-    fillRect(fb, x, y, w, h, style.panel_bg);
+    gui.fillRoundedRect(fb, x, y, w, h, style.rounding, style.panel_bg);
+    if (w > 4 and h > 4) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(style.panel_bg, 20));
+        fillRect(fb, x + 1, y + @as(i32, @intCast(h)) - 2, w - 2, 1, style.separator);
+    }
     drawRectBorder(fb, x, y, w, h, style.border);
 
     var cx = x + 4;
@@ -274,10 +310,11 @@ pub fn drawMenuBar(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, bar: *M
             mouse_y >= y and mouse_y < y + @as(i32, @intCast(h));
 
         if (is_hovered or bar.menus[i].open) {
-            fillRect(fb, cx, y, tw, h, style.button_hover);
+            gui.fillRoundedRect(fb, cx, y + 2, tw, h -| 4, style.rounding, if (bar.menus[i].open) gui.mixColor(style.button_hover, style.accent, 80) else style.button_hover);
+            if (bar.menus[i].open) fillRect(fb, cx + 2, y + @as(i32, @intCast(h)) - 4, tw - 4, 2, style.accent_hover);
         }
 
-        drawText(fb, label, cx + 6, y + 4, style.text, 8);
+        drawText(fb, label, cx + 6, y + 5, if (is_hovered or bar.menus[i].open) style.text else style.text_dim, 8);
 
         if (is_hovered and clicked) {
             if (bar.active_menu == @as(i32, @intCast(i))) {
@@ -485,6 +522,14 @@ fn drawRectBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u
     fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, color);
 }
 
+fn drawInsetBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, light: u32, dark: u32) void {
+    if (w < 2 or h < 2) return;
+    fillRect(fb, x, y, w, 1, light);
+    fillRect(fb, x, y, 1, h, light);
+    fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, dark);
+    fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, dark);
+}
+
 fn drawText(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, size: u32) void {
     const scale = if (size >= 8) @as(u32, @intCast(@divFloor(size, 8))) else 1;
     var cx = x;
@@ -515,6 +560,40 @@ fn drawText(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, 
         }
         cx += @as(i32, @intCast(scale * 8 + 2));
     }
+}
+
+pub fn drawCard(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, style: *const gui.Style, shadow_intensity: u8, accent_color: u32) void {
+    const r = @min(style.window_rounding, @as(u8, @intCast(@min(w, h) / 2)));
+    gui.drawShadow(fb, x, y, w, h, shadow_intensity, r);
+    gui.fillRoundedRect(fb, x, y, w, h, r, style.panel_bg);
+    if (w > 6 and h > 6) {
+        fillRect(fb, x + @as(i32, r), y + 1, w - @as(u32, r) * 2, 1, gui.lightenColor(style.panel_bg, 22));
+        fillRect(fb, x + 1, y + @as(i32, @intCast(h)) - 2, w - 2, 1, gui.darkenColor(style.panel_bg, 28));
+    }
+    const band_h: u32 = @min(@as(u32, 4), h);
+    gui.fillRoundedRect(fb, x, y, w, band_h + @as(u32, r), r, accent_color);
+    if (band_h + @as(u32, r) < h) {
+        fillRect(fb, x, y + @as(i32, @intCast(band_h)), w, @as(u32, r), style.panel_bg);
+        fillRect(fb, x + 1, y + @as(i32, @intCast(band_h)), w - 2, 1, gui.mixColor(accent_color, style.panel_bg, 120));
+    }
+    drawRectBorder(fb, x, y, w, h, style.border);
+    drawInsetBorder(fb, x + 1, y + 1, w -| 2, h -| 2, gui.lightenColor(style.panel_bg, 16), gui.darkenColor(style.panel_bg, 32));
+}
+
+pub fn drawRoundedButton(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, label: []const u8, style: *const gui.Style, color: u32, hover_color: u32, mouse_x: i32, mouse_y: i32, clicked: bool) bool {
+    const hovered = mouse_x >= x and mouse_x < x + @as(i32, @intCast(w)) and
+        mouse_y >= y and mouse_y < y + @as(i32, @intCast(h));
+    const bg = if (hovered and clicked) style.button_active else if (hovered) hover_color else color;
+    if (hovered) gui.drawShadow(fb, x, y, w, h, style.shadow, style.rounding);
+    gui.fillRoundedRect(fb, x, y, w, h, style.rounding, bg);
+    if (w > 6 and h > 6) {
+        fillRect(fb, x + 1, y + 1, w - 2, 1, gui.lightenColor(bg, 26));
+        fillRect(fb, x + 1, y + @as(i32, @intCast(h)) - 2, w - 2, 1, gui.darkenColor(bg, 34));
+    }
+    drawRectBorder(fb, x, y, w, h, if (hovered) style.accent else style.border);
+    const tw = @as(i32, @intCast(label.len * 8));
+    drawText(fb, label, x + @divTrunc(@as(i32, @intCast(w)) - tw, 2), y + @divTrunc(@as(i32, @intCast(h)) - 8, 2), style.button_text, 8);
+    return hovered and clicked;
 }
 
 fn drawCircle(fb: *gfx.Framebuffer, cx: i32, cy: i32, r: i32, color: u32) void {
