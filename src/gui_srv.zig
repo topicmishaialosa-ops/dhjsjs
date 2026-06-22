@@ -24,6 +24,7 @@ const CMD_WAIT: u8 = 12;
 const CMD_SET_THEME: u8 = 13;
 const CMD_SET_STYLE_COLOR: u8 = 14;
 const CMD_SET_STYLE_ROUNDING: u8 = 15;
+const CMD_HOTSPOT: u8 = 16;
 
 var BG: u32 = 0xFF1E1E1E;
 var PANEL_BG: u32 = 0xFF2D2D2D;
@@ -35,6 +36,7 @@ var BORDER: u32 = 0xFF555555;
 var CHECK_MARK: u32 = 0xFF4EC9B0;
 var INPUT_BG: u32 = 0xFF1E1E1E;
 var SEPARATOR: u32 = 0xFF333333;
+var ROUNDING: u32 = 0;
 
 const Widget = struct {
     type: u8,
@@ -150,6 +152,39 @@ fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) vo
     }
 }
 
+fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, rd: u32, color: u32) void {
+    if (rd == 0 or w < rd * 2 or h < rd * 2) { fillRect(fb, x, y, w, h, color); return; }
+    const r: u32 = rd;
+    fillRect(fb, x + @as(i32, @intCast(r)), y, w - r * 2, r, color);
+    fillRect(fb, x, y + @as(i32, @intCast(r)), w, h - r * 2, color);
+    fillRect(fb, x + @as(i32, @intCast(r)), y + @as(i32, @intCast(h - r)), w - r * 2, r, color);
+    const r2 = r * r;
+    var dy: u32 = 0;
+    while (dy < r) : (dy += 1) {
+        var dx: u32 = 0;
+        while (dx < r) : (dx += 1) {
+            const in_corner = (@as(f64, @floatFromInt(dx)) + 0.5) * (@as(f64, @floatFromInt(dx)) + 0.5) + (@as(f64, @floatFromInt(dy)) + 0.5) * (@as(f64, @floatFromInt(dy)) + 0.5) <= @as(f64, @floatFromInt(r2));
+            if (!in_corner) continue;
+            const tlx = x + @as(i32, @intCast(r)) - 1 - @as(i32, @intCast(dx));
+            const tly = y + @as(i32, @intCast(r)) - 1 - @as(i32, @intCast(dy));
+            if (tlx >= 0 and tly >= 0 and tlx < @as(i32, @intCast(fb.width)) and tly < @as(i32, @intCast(fb.height)))
+                fb.pixels[@as(usize, @intCast(tly)) * fb.stride + @as(usize, @intCast(tlx))] = color;
+            const trx = x + @as(i32, @intCast(w - r)) + @as(i32, @intCast(dx));
+            const try_ = y + @as(i32, @intCast(r)) - 1 - @as(i32, @intCast(dy));
+            if (trx >= 0 and try_ >= 0 and trx < @as(i32, @intCast(fb.width)) and try_ < @as(i32, @intCast(fb.height)))
+                fb.pixels[@as(usize, @intCast(try_)) * fb.stride + @as(usize, @intCast(trx))] = color;
+            const blx = x + @as(i32, @intCast(r)) - 1 - @as(i32, @intCast(dx));
+            const bly = y + @as(i32, @intCast(h - r)) + @as(i32, @intCast(dy));
+            if (blx >= 0 and bly >= 0 and blx < @as(i32, @intCast(fb.width)) and bly < @as(i32, @intCast(fb.height)))
+                fb.pixels[@as(usize, @intCast(bly)) * fb.stride + @as(usize, @intCast(blx))] = color;
+            const brx = x + @as(i32, @intCast(w - r)) + @as(i32, @intCast(dx));
+            const bry = y + @as(i32, @intCast(h - r)) + @as(i32, @intCast(dy));
+            if (brx >= 0 and bry >= 0 and brx < @as(i32, @intCast(fb.width)) and bry < @as(i32, @intCast(fb.height)))
+                fb.pixels[@as(usize, @intCast(bry)) * fb.stride + @as(usize, @intCast(brx))] = color;
+        }
+    }
+}
+
 fn drawLineRaw(fb: *gfx.Framebuffer, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) void {
     const dx: i32 = if (x2 >= x1) x2 - x1 else x1 - x2;
     const dy_abs: i32 = if (y2 >= y1) y2 - y1 else y1 - y2;
@@ -177,7 +212,19 @@ fn drawShadow(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, intensity: u
 }
 
 fn drawBox(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, bg: u32, border: u32, accent: bool) void {
-    fillRect(fb, x, y, w, h, bg);
+    if (ROUNDING > 0 and w >= ROUNDING * 2 and h >= ROUNDING * 2) {
+        fillRoundedRect(fb, x, y, w, h, ROUNDING, bg);
+        fillRect(fb, x + @as(i32, @intCast(ROUNDING)), y, w - ROUNDING * 2, 1, border);
+        fillRect(fb, x + @as(i32, @intCast(ROUNDING)), y + @as(i32, @intCast(h)) - 1, w - ROUNDING * 2, 1, border);
+        fillRect(fb, x, y + @as(i32, @intCast(ROUNDING)), 1, h - ROUNDING * 2, border);
+        fillRect(fb, x + @as(i32, @intCast(w)) - 1, y + @as(i32, @intCast(ROUNDING)), 1, h - ROUNDING * 2, border);
+    } else {
+        fillRect(fb, x, y, w, h, bg);
+        fillRect(fb, x, y, w, 1, border);
+        fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, border);
+        fillRect(fb, x, y, 1, h, border);
+        fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, border);
+    }
     if (w > 4 and h > 4) {
         fillRect(fb, x + 1, y + 1, w - 2, 1, lightenColor(bg, 28));
         fillRect(fb, x + 1, y + @as(i32, @intCast(h)) - 2, w - 2, 1, darkenColor(bg, 44));
@@ -185,10 +232,6 @@ fn drawBox(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, bg: u32, border
     if (accent and w > 8) {
         fillRect(fb, x + 3, y + @as(i32, @intCast(h)) - 3, w - 6, 2, ACCENT);
     }
-    fillRect(fb, x, y, w, 1, border);
-    fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, border);
-    fillRect(fb, x, y, 1, h, border);
-    fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, border);
 }
 
 fn drawBtn(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, label: []const u8, hovered: bool) void {
@@ -426,7 +469,7 @@ pub fn main() void {
                 continue;
             }
             if (cmd.type == CMD_SET_STYLE_ROUNDING) {
-                // Stub — rounding not used in gui_srv's simple renderer
+                ROUNDING = @as(u32, @intFromFloat(cmd.val));
                 continue;
             }
             if (cmd.type == CMD_SET_THEME) {
@@ -582,6 +625,22 @@ pub fn main() void {
                         while (vi < 4) : (vi += 1) results_buf[ri + vi] = id_le[vi];
                         valAsBytes(if (checked) 1.0 else 0.0, results_buf[ri + 4 .. ri + 12]);
                         result_count += 1;
+                    }
+                },
+                CMD_HOTSPOT => {
+                    if (clicked) {
+                        const ri = 2 + result_count * 12;
+                        if (ri + 12 <= results_buf.len) {
+                            var id_le: [4]u8 = undefined;
+                            id_le[0] = @as(u8, @intCast(w.id & 0xFF));
+                            id_le[1] = @as(u8, @intCast((w.id >> 8) & 0xFF));
+                            id_le[2] = @as(u8, @intCast((w.id >> 16) & 0xFF));
+                            id_le[3] = @as(u8, @intCast((w.id >> 24) & 0xFF));
+                            var vi: usize = 0;
+                            while (vi < 4) : (vi += 1) results_buf[ri + vi] = id_le[vi];
+                            valAsBytes(w.val, results_buf[ri + 4 .. ri + 12]);
+                            result_count += 1;
+                        }
                     }
                 },
                 else => {},

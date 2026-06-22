@@ -2462,8 +2462,170 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          cb.addRImm32(cg.RSP, 64);
          return;
        }
-       if (eq(name, "audioplay")) {
-        const ch = n.first_child;
+      if (eq(name, "guiPoll") or eq(name, "guipoll")) {
+          // guiPoll(efd) -> sends CMD_FRAME, reads response into stack buffer, returns buf address
+          // efd is encoded fd from guiServer: (read_fd << 32) | write_fd
+          const po_ch = n.first_child;
+          if (po_ch != parser_mod.NO_NODE) { compileExprNode(po_ch, pool, cb, vars, vc, errs); }
+          else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          cb.popR(cg.R10); // R10 = efd
+          cb.movRR(cg.R11, cg.R10); // R11 = efd
+          cb.shlRImm8(cg.R11, 32); // R11 = write_fd << 32 (garbage in lower 32)
+          cb.shrRImm8(cg.R11, 32); // R11 = write_fd (lower 32 bits of efd)
+          cb.shrRImm8(cg.R10, 32); // R10 = read_fd (upper 32 bits of efd)
+          cb.pushR(cg.R11); // save write_fd
+          cb.pushR(cg.R10); // save read_fd
+          // Allocate 262-byte buffer on stack (aligned to 8)
+          cb.subRImm32(cg.RSP, 272);
+          cb.movRR(cg.R12, cg.RSP); // R12 = buf
+          // Build CMD_FRAME (61 bytes, type=5, rest=0)
+          cb.movRImm64(cg.RDI, 0);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.pushR(cg.RDI);
+          cb.byte(0x48); cb.byte(0x8D); cb.byte(0x04); cb.byte(0x24); // lea rax, [rsp]
+          cb.movRImm64(cg.RDI, 5);
+          cb.movMemR8(cg.RAX, 0, cg.RDI); // buf[0] = 5 (CMD_FRAME)
+          // Zero out bytes 1-60
+          cb.xorRR(cg.RDI, cg.RDI);
+          cb.movMemR64(cg.RAX, 1, cg.RDI);
+          cb.movMemR64(cg.RAX, 9, cg.RDI);
+          cb.movMemR64(cg.RAX, 17, cg.RDI);
+          cb.movMemR64(cg.RAX, 25, cg.RDI);
+          cb.movMemR64(cg.RAX, 33, cg.RDI);
+          cb.movMemR64(cg.RAX, 41, cg.RDI);
+          cb.movMemR64(cg.RAX, 49, cg.RDI);
+          cb.movMemR64(cg.RAX, 57, cg.RDI);
+          // Write 61 bytes to write_fd
+          cb.movRR(cg.RDI, cg.R11); // write_fd
+          cb.movRR(cg.RSI, cg.RAX); // buf
+          cb.movRImm64(cg.RDX, 61);
+          cb.movRImm64(cg.RAX, 1);
+          cb.syscall();
+          // Read response from read_fd into R12 buffer
+          cb.popR(cg.RDI); // this is one of the zeros from the push stack
+          cb.popR(cg.RDI); // this too
+          // Actually restore read_fd properly
+          cb.addRImm32(cg.RSP, 6*8); // skip remaining zero pushes
+          cb.popR(cg.RDI); // read_fd (was saved second)
+          cb.movRR(cg.RSI, cg.R12); // buffer
+          cb.movRImm64(cg.RDX, 262);
+          cb.movRImm64(cg.RAX, 0);
+          cb.syscall();
+          // Return buffer address in RAX, leave buffer on stack
+          cb.movRR(cg.RAX, cg.R12);
+          return;
+      }
+      if (eq(name, "guiCount") or eq(name, "guicount")) {
+          // guiCount(buf) -> reads u16 from buf[0..1]
+          const gc_ch = n.first_child;
+          if (gc_ch != parser_mod.NO_NODE) { compileExprNode(gc_ch, pool, cb, vars, vc, errs); }
+          else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          cb.popR(cg.RDI);
+          cb.movzxRMem8(cg.RAX, cg.RDI, 0);
+          cb.pushR(cg.RAX);
+          cb.movzxRMem8(cg.RAX, cg.RDI, 1);
+          cb.shlRImm8(cg.RAX, 8);
+          cb.popR(cg.RDI);
+          cb.orRR(cg.RAX, cg.RDI);
+          return;
+      }
+      if (eq(name, "guiEvId") or eq(name, "guievid")) {
+          // guiEvId(buf, idx) -> reads u32 from buf[2 + idx*12]
+          var ei_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var ei_ac: usize = 0;
+          var ei_ch = n.first_child;
+          while (ei_ch != parser_mod.NO_NODE and ei_ac < 2) {
+              ei_args[ei_ac] = ei_ch;
+              ei_ch = pool[@as(usize, @intCast(ei_ch))].next_sibling;
+              ei_ac += 1;
+          }
+          if (ei_args[0] != parser_mod.NO_NODE) { compileExprNode(ei_args[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          if (ei_args[1] != parser_mod.NO_NODE) { compileExprNode(ei_args[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          cb.popR(cg.R8); // R8 = idx
+          cb.popR(cg.R9); // R9 = buf
+          cb.movRImm64(cg.R10, 12);
+          cb.imulRR(cg.R10, cg.R8); // R10 = idx * 12
+          cb.addRImm32(cg.R10, 2); // R10 = idx * 12 + 2
+          cb.addRR(cg.R10, cg.R9); // R10 = buf + idx * 12 + 2
+          cb.movRMem32(cg.RAX, cg.R10, 0);
+          return;
+      }
+      if (eq(name, "guiEvVal") or eq(name, "guievval")) {
+          // guiEvVal(buf, idx) -> reads u64 from buf[6 + idx*12]
+          var ev_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var ev_ac: usize = 0;
+          var ev_ch = n.first_child;
+          while (ev_ch != parser_mod.NO_NODE and ev_ac < 2) {
+              ev_args[ev_ac] = ev_ch;
+              ev_ch = pool[@as(usize, @intCast(ev_ch))].next_sibling;
+              ev_ac += 1;
+          }
+          if (ev_args[0] != parser_mod.NO_NODE) { compileExprNode(ev_args[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          if (ev_args[1] != parser_mod.NO_NODE) { compileExprNode(ev_args[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.pushR(cg.RAX);
+          cb.popR(cg.R8); // R8 = idx
+          cb.popR(cg.R9); // R9 = buf
+          cb.movRImm64(cg.R10, 12);
+          cb.imulRR(cg.R10, cg.R8); // R10 = idx * 12
+          cb.addRImm32(cg.R10, 6); // R10 = idx * 12 + 2 + 4 = idx*12 + 6
+          cb.addRR(cg.R10, cg.R9); // R10 = buf + idx * 12 + 6
+          cb.movRMem64(cg.RAX, cg.R10, 0);
+          return;
+      }
+      if (eq(name, "guiHotspot") or eq(name, "guihotspot")) {
+          var hs_a: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+          var hs_c: usize = 0;
+          var hs_ch = n.first_child;
+          while (hs_ch != parser_mod.NO_NODE and hs_c < 6) {
+              hs_a[hs_c] = hs_ch;
+              hs_ch = pool[@as(usize, @intCast(hs_ch))].next_sibling;
+              hs_c += 1;
+          }
+          cb.subRImm32(cg.RSP, 64);
+          cb.movRImm64(cg.RDI, 16);
+          cb.movMemR8(cg.RSP, 0, cg.RDI);
+          cb.movRImm64(cg.RDI, 0);
+          cb.movMemR64(cg.RSP, 1, cg.RDI);
+          cb.movMemR64(cg.RSP, 9, cg.RDI);
+          cb.movMemR64(cg.RSP, 17, cg.RDI);
+          cb.movMemR64(cg.RSP, 21, cg.RDI);
+          cb.movMemR64(cg.RSP, 29, cg.RDI);
+          cb.movMemR64(cg.RSP, 37, cg.RDI);
+          cb.movMemR64(cg.RSP, 45, cg.RDI);
+          cb.movMemR64(cg.RSP, 53, cg.RDI);
+          if (hs_a[1] != parser_mod.NO_NODE) { compileExprNode(hs_a[1], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.movMemR32(cg.RSP, 1, cg.RAX);
+          if (hs_a[2] != parser_mod.NO_NODE) { compileExprNode(hs_a[2], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.movMemR32(cg.RSP, 5, cg.RAX);
+          if (hs_a[3] != parser_mod.NO_NODE) { compileExprNode(hs_a[3], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.movMemR32(cg.RSP, 9, cg.RAX);
+          if (hs_a[4] != parser_mod.NO_NODE) { compileExprNode(hs_a[4], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.movMemR32(cg.RSP, 13, cg.RAX);
+          if (hs_a[5] != parser_mod.NO_NODE) { compileExprNode(hs_a[5], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
+          cb.movMemR32(cg.RSP, 17, cg.RAX);
+          if (hs_a[0] != parser_mod.NO_NODE) { compileExprNode(hs_a[0], pool, cb, vars, vc, errs); cb.pushR(cg.RAX); cb.popR(cg.RDI); } else { cb.xorRR(cg.RDI, cg.RDI); }
+          cb.shlRImm8(cg.RDI, 32);
+          cb.shrRImm8(cg.RDI, 32);
+          cb.leaRMem(cg.RSI, cg.RSP, 0);
+          cb.movRImm64(cg.RDX, 61);
+          cb.movRImm64(cg.RAX, 1);
+          cb.syscall();
+          cb.addRImm32(cg.RSP, 64);
+          return;
+      }
+        if (eq(name, "audioplay")) {
+         const ch = n.first_child;
         if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
         cb.pushR(cg.RAX);

@@ -1922,6 +1922,160 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
           cb.ldr32(cg.X0, cg.X1, 0);
           return;
       }
+            if (eq(name, "guiPoll") or eq(name, "guipoll")) {
+          // guiPoll(efd) -> sends CMD_FRAME, reads response into stack buffer, returns buf address
+          // efd = (read_fd << 32) | write_fd
+          const gp_ch = n.first_child;
+          if (gp_ch != parser_mod.NO_NODE) { compileExprNode(gp_ch, pool, cb, vars, vc, frame); }
+          else { cb.mov(cg.X0, cg.ZR); }
+          cb.mov(cg.X19, cg.X0); // X19 = efd
+          cb.lsrImm(cg.X20, cg.X19, 32); // X20 = read_fd
+          cb.movRImm64(cg.X21, 0xFFFFFFFF);
+          cb.and_(cg.X21, cg.X19, cg.X21); // X21 = write_fd (lower 32 bits, zero-extended)
+          emitStackSub(cb, 272);
+          cb.addi(cg.X22, 31, 0); // X22 = buf = SP
+          // Build CMD_FRAME: 61 bytes, type=5, rest=0
+          cb.mov(cg.X0, cg.ZR);
+          cb.str64(cg.X0, cg.X22, 0);
+          cb.str64(cg.X0, cg.X22, 8);
+          cb.str64(cg.X0, cg.X22, 16);
+          cb.str64(cg.X0, cg.X22, 24);
+          cb.str64(cg.X0, cg.X22, 32);
+          cb.str64(cg.X0, cg.X22, 40);
+          cb.str64(cg.X0, cg.X22, 48);
+          cb.str64(cg.X0, cg.X22, 56);
+          cb.movRImm64(cg.X0, 5);
+          cb.str8(cg.X0, cg.X22, 0); // buf[0] = CMD_FRAME
+          // Write 61 bytes to write_fd
+          cb.movRImm64(cg.X8, 64);
+          cb.mov(cg.X0, cg.X21);
+          cb.mov(cg.X1, cg.X22);
+          cb.movRImm64(cg.X2, 61);
+          cb.svc(0);
+          // Read response from read_fd into same buffer
+          cb.movRImm64(cg.X8, 63);
+          cb.mov(cg.X0, cg.X20);
+          cb.mov(cg.X1, cg.X22);
+          cb.movRImm64(cg.X2, 262);
+          cb.svc(0);
+          cb.mov(cg.X0, cg.X22);
+          return;
+      }
+      if (eq(name, "guiCount") or eq(name, "guicount")) {
+          // guiCount(buf) -> reads u16 from buf[0..1]
+          const gc_ch = n.first_child;
+          if (gc_ch != parser_mod.NO_NODE) { compileExprNode(gc_ch, pool, cb, vars, vc, frame); }
+          else { cb.mov(cg.X0, cg.ZR); }
+          cb.mov(cg.X19, cg.X0); // X19 = buf
+          cb.ldr8(cg.X0, cg.X19, 0);
+          cb.ldr8(cg.X1, cg.X19, 1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.orr(cg.X0, cg.X0, cg.X1);
+          return;
+      }
+      if (eq(name, "guiEvId") or eq(name, "guievid")) {
+          var ei_a: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var ei_c: usize = 0;
+          var ei_ch = n.first_child;
+          while (ei_ch != parser_mod.NO_NODE and ei_c < 2) {
+              ei_a[ei_c] = ei_ch;
+              ei_ch = pool[@as(usize, @intCast(ei_ch))].next_sibling;
+              ei_c += 1;
+          }
+          if (ei_a[0] != parser_mod.NO_NODE) { compileExprNode(ei_a[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ei_a[1] != parser_mod.NO_NODE) { compileExprNode(ei_a[1], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.mov(cg.X19, cg.X0); // X19 = idx
+          popX0(cb);
+          cb.mov(cg.X20, cg.X0); // X20 = buf
+          cb.movRImm64(cg.X1, 12);
+          cb.mul(cg.X19, cg.X19, cg.X1); // X19 = idx * 12
+          cb.addi(cg.X19, cg.X19, 2); // X19 = idx * 12 + 2
+          cb.add(cg.X19, cg.X19, cg.X20); // X19 = buf + idx*12 + 2
+          cb.ldr32(cg.X0, cg.X19, 0);
+          return;
+      }
+      if (eq(name, "guiEvVal") or eq(name, "guievval")) {
+          var ev_a: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var ev_c: usize = 0;
+          var ev_ch = n.first_child;
+          while (ev_ch != parser_mod.NO_NODE and ev_c < 2) {
+              ev_a[ev_c] = ev_ch;
+              ev_ch = pool[@as(usize, @intCast(ev_ch))].next_sibling;
+              ev_c += 1;
+          }
+          if (ev_a[0] != parser_mod.NO_NODE) { compileExprNode(ev_a[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ev_a[1] != parser_mod.NO_NODE) { compileExprNode(ev_a[1], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.mov(cg.X19, cg.X0); // X19 = idx
+          popX0(cb);
+          cb.mov(cg.X20, cg.X0); // X20 = buf
+          cb.movRImm64(cg.X1, 12);
+          cb.mul(cg.X19, cg.X19, cg.X1); // X19 = idx * 12
+          cb.addi(cg.X19, cg.X19, 6); // X19 = idx * 12 + 6
+          cb.add(cg.X19, cg.X19, cg.X20); // X19 = buf + idx*12 + 6
+          cb.ldr64(cg.X0, cg.X19, 0);
+          return;
+      }
+      if (eq(name, "guiHotspot") or eq(name, "guihotspot")) {
+          // guiHotspot(fd, id, x, y, w, h, val) -> writes CMD_HOTSPOT (16)
+          var hs_a: [6]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 6;
+          var hs_c: usize = 0;
+          var hs_ch = n.first_child;
+          while (hs_ch != parser_mod.NO_NODE and hs_c < 6) {
+              hs_a[hs_c] = hs_ch;
+              hs_ch = pool[@as(usize, @intCast(hs_ch))].next_sibling;
+              hs_c += 1;
+          }
+          // Evaluate fd
+          if (hs_a[0] != parser_mod.NO_NODE) { compileExprNode(hs_a[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.mov(cg.X19, cg.X0); // X19 = efd
+          cb.lsrImm(cg.X20, cg.X19, 32);
+          cb.movRImm64(cg.X21, 0xFFFFFFFF);
+          cb.and_(cg.X21, cg.X19, cg.X21); // X21 = write_fd
+          emitStackSub(cb, 64);
+          cb.addi(cg.X22, 31, 0);
+          // Zero out the buffer
+          cb.mov(cg.X0, cg.ZR);
+          cb.str64(cg.X0, cg.X22, 0);
+          cb.str64(cg.X0, cg.X22, 8);
+          cb.str64(cg.X0, cg.X22, 16);
+          cb.str64(cg.X0, cg.X22, 24);
+          cb.str64(cg.X0, cg.X22, 32);
+          cb.str64(cg.X0, cg.X22, 40);
+          cb.str64(cg.X0, cg.X22, 48);
+          cb.str64(cg.X0, cg.X22, 56);
+          // Set type = CMD_HOTSPOT (16)
+          cb.movRImm64(cg.X0, 16);
+          cb.str8(cg.X0, cg.X22, 0);
+          // Evaluate and write remaining args (id, x, y, w, h)
+          if (hs_a[1] != parser_mod.NO_NODE) { compileExprNode(hs_a[1], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.str32(cg.X0, cg.X22, 1); // id at offset 1
+          if (hs_a[2] != parser_mod.NO_NODE) { compileExprNode(hs_a[2], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.str32(cg.X0, cg.X22, 5); // x at offset 5
+          if (hs_a[3] != parser_mod.NO_NODE) { compileExprNode(hs_a[3], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.str32(cg.X0, cg.X22, 9); // y at offset 9
+          if (hs_a[4] != parser_mod.NO_NODE) { compileExprNode(hs_a[4], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.str32(cg.X0, cg.X22, 13); // w at offset 13
+          if (hs_a[5] != parser_mod.NO_NODE) { compileExprNode(hs_a[5], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          cb.str32(cg.X0, cg.X22, 17); // h at offset 17
+          // Write buffer to write_fd
+          cb.movRImm64(cg.X8, 64);
+          cb.mov(cg.X0, cg.X21);
+          cb.mov(cg.X1, cg.X22);
+          cb.movRImm64(cg.X2, 61);
+          cb.svc(0);
+          emitStackAdd(cb, 64);
+          cb.mov(cg.X0, cg.ZR);
+          return;
+      }
       cb.mov(cg.X0, cg.ZR);
 
 }
