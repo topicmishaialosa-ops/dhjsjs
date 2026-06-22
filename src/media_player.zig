@@ -5,6 +5,7 @@ const gui_ext = @import("gui_ext.zig");
 const display_mod = @import("display.zig");
 const player_mod = @import("player.zig");
 const audio = @import("audio.zig");
+const mouse_mod = @import("mouse.zig");
 
 const W: u32 = 800;
 const H: u32 = 600;
@@ -98,12 +99,7 @@ pub fn main() void {
     gui_ext.addMenu(&menu_bar, "View");
     gui_ext.addMenu(&menu_bar, "Help");
 
-    var mouse_x: i32 = 0;
-    var mouse_y: i32 = 0;
-    var mouse_down = false;
-    var mouse_clicked = false;
-    var mouse_released = false;
-    var scroll_delta: i32 = 0;
+    var mouse = mouse_mod.State.init();
     var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
     var volume: f32 = 0.8;
@@ -113,9 +109,7 @@ pub fn main() void {
 
     var running = true;
     while (running) {
-        mouse_clicked = false;
-        mouse_released = false;
-        scroll_delta = 0;
+        mouse.beginFrame();
 
         while (disp.pollEvent()) |event| {
             switch (event) {
@@ -149,36 +143,21 @@ pub fn main() void {
                 .key_release => |kc| {
                     if (kc < gui_mod.MAX_KEY) key_state[kc] = false;
                 },
-                .mouse_move => |m| { mouse_x = m.x; mouse_y = m.y; },
-                .mouse_down => |m| {
-                    mouse_x = m.x; mouse_y = m.y;
-                    mouse_down = true;
-                    mouse_clicked = true;
-                },
-                .mouse_up => |m| {
-                    mouse_x = m.x; mouse_y = m.y;
-                    mouse_down = false;
-                    mouse_released = true;
-                },
+                .mouse_move, .mouse_down, .mouse_up, .scroll => mouse.applyEvent(event),
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
-                .scroll => |s| { scroll_delta += s.dy; },
             }
         }
+        mouse.endFrame();
 
-        const input = gui_mod.InputState{
-            .mouse_x = mouse_x,
-            .mouse_y = mouse_y,
-            .mouse_down = mouse_down,
-            .mouse_clicked = mouse_clicked,
-            .mouse_released = mouse_released,
-            .scroll = scroll_delta,
-            .keys = key_state,
-            .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
-            .text_input = [_]u8{0} ** 16,
-            .text_len = 0,
-        };
+        const input = gui_mod.InputState.fromMouse(
+            mouse,
+            key_state,
+            [_]bool{false} ** gui_mod.MAX_KEY,
+            [_]u8{0} ** 16,
+            0,
+        );
 
         if (player.state == .playing) {
             _ = player.update();
@@ -186,20 +165,20 @@ pub fn main() void {
 
         gui.beginFrame(&fb, input);
 
-        gui_ext.drawMenuBar(&fb, 0, 0, W, 24, &menu_bar, &gui.style, mouse_x, mouse_y, mouse_clicked);
+        gui_ext.drawMenuBar(&fb, 0, 0, W, 24, &menu_bar, &gui.style, mouse.x, mouse.y, mouse.primary_pressed);
 
-        _ = gui_ext.drawTabBar(&fb, 0, 24, W, 28, &tab_bar, &gui.style, mouse_x, mouse_y, mouse_clicked);
+        _ = gui_ext.drawTabBar(&fb, 0, 24, W, 28, &tab_bar, &gui.style, mouse.x, mouse.y, mouse.primary_pressed);
 
         if (tab_bar.active_tab == 0) {
             drawPlayerView(&fb, &gui, &player, &tracks, track_count, &current_track,
                 &volume, &show_visualizer, &loop_mode, &shuffle_mode,
-                mouse_x, mouse_y, mouse_clicked);
+                mouse.x, mouse.y, mouse.primary_pressed);
         } else if (tab_bar.active_tab == 1) {
             drawLibraryView(&fb, &gui, &player, &tracks, &track_count, &current_track, &tree, &scroll,
-                mouse_x, mouse_y, mouse_clicked);
+                mouse.x, mouse.y, mouse.primary_pressed);
         } else {
             drawSettingsView(&fb, &gui, &volume, &show_visualizer, &loop_mode, &shuffle_mode,
-                mouse_x, mouse_y, mouse_clicked);
+                mouse.x, mouse.y, mouse.primary_pressed);
         }
 
         gui.endFrame();

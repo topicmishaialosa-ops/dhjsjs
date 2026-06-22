@@ -1,7 +1,6 @@
 fn main() int {
     hui style_idx = 0;
     hui show_menu = 0;
-    hui prev_touch = 0;
     hui frame = 0;
     hui btn_press = 0;
 
@@ -81,7 +80,7 @@ fn main() int {
         android_rect(sx + sw / 2 - 16, sy + 10, 32, 16, style_text);
         android_rect(sx + sw / 2 - 8, sy + 12, 16, 4, style_text);
 
-        if td == 1 && prev_touch == 0 {
+        if android_clicked() == 1 {
             if ty > sy && ty < sy + sh && tx > sx && tx < sx + sw {
                 style_idx = style_idx + 1;
                 if style_idx >= 4 { style_idx = 0; }
@@ -121,7 +120,6 @@ fn main() int {
             }
         }
 
-        prev_touch = td;
         frame = frame + 1;
     }
     return 0;

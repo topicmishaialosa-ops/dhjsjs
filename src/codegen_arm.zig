@@ -252,6 +252,11 @@ pub const CodeBuffer = struct {
         self.dword(0x79000000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
     }
 
+    pub fn ldr16(self: *CodeBuffer, rt: u8, rn: u8, off: i32) void {
+        const imm12: u32 = (@as(u32, @intCast(off)) >> 1) & 0xFFF;
+        self.dword(0x79400000 | (imm12 << 10) | (@as(u32, rn) << 5) | rt);
+    }
+
     pub fn branch(self: *CodeBuffer) void {
         self.dword(0x14000000);
     }

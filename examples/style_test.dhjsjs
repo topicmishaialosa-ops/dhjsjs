@@ -1,0 +1,13 @@
+fn main() int {
+    hui fd = guiServer();
+    hui wfd = fd & 0xFFFFFFFF;
+    // setStyleColor and setStyleRounding are void builtins that write to pipe
+    setStyleColor(wfd, 1, 0x1a1a2e);
+    setStyleRounding(wfd, 8);
+    setStyleColor(wfd, 5, 0x3366ff);
+    // Build a simple layout
+    guiCmd(wfd, 5, 0, 0, 0, 400, 300, 0, "");
+    guiCmd(wfd, 1, 1, 20, 50, 120, 30, 0, "Hello");
+    guiCmd(wfd, 5, 0, 0, 0, 400, 300, 0, "");
+    return 0;
+}

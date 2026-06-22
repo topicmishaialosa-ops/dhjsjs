@@ -1,7 +1,7 @@
 pub const ANDROID_FB_ADDR: u64 = 0x200000;
 pub const ANDROID_CMD_ADDR: u64 = 0x200100;
 
-pub const AndroidCmd = struct {
+pub const AndroidCmd = extern struct {
     activity_ptr: u64,
     window_ptr: u64,
     input_queue_ptr: u64,
@@ -34,6 +34,9 @@ pub const AndroidCmd = struct {
     touch_y_arr: [16]f32,
     touch_down_arr: [16]u32,
     touch_id_arr: [16]u32,
+    clicked: u32,
+    click_x: f32,
+    click_y: f32,
 };
 
 pub const AndroidFb = struct {
@@ -74,5 +77,8 @@ pub fn initCmd() AndroidCmd {
         .touch_y_arr = [_]f32{0} ** 16,
         .touch_down_arr = [_]u32{0} ** 16,
         .touch_id_arr = [_]u32{0} ** 16,
+        .clicked = 0,
+        .click_x = 0,
+        .click_y = 0,
     };
 }

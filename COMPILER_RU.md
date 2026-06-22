@@ -469,7 +469,7 @@ rel32 = target - (current_pos + 5)  // 5 = длина call/jmp rel32
 
 ### Назначение
 
-`compiler.zig` (2785 строк, самый большой файл) — семантический компилятор для x86-64. Обходит AST и генерирует машинный код в CodeBuffer.
+`compiler.zig` (~3179 строк, самый большой файл) — семантический компилятор для x86-64. Обходит AST и генерирует машинный код в CodeBuffer.
 
 ### Основной цикл компиляции
 
@@ -834,18 +834,24 @@ struct Point { x: int, y: int }
 | `send(fd, buf, len, flags)` | syscall send | Отправить |
 | `recv(fd, buf, len, flags)` | syscall recv | Принять |
 
-**Составные builtins (fork+exec):**
+**Составные builtins (fork+exec на x86, inline на ARM64):**
 
 | Имя | Что делает |
 |-----|-----------|
-| `http.get(host, path)` | pipe + fork → exec http_client GET |
-| `http.post(host, path, body)` | pipe + fork → exec http_client POST |
+| `http.get(host, path)` | x86: pipe+fork→exec http_client GET; ARM64: inline socket+DNS |
+| `http.post(host, path, body)` | x86: pipe+fork→exec http_client POST; ARM64: inline socket+DNS |
 | `http_get(host, path)` | алиас для http.get |
 | `httpget(host, path)` | алиас для http.get |
 | `http_post(host, path, body)` | алиас для http.post |
 | `httppost(host, path, body)` | алиас для http.post |
-| `resolve(host)` | pipe + fork → exec http_client resolve |
+| `resolve(host)` | x86: pipe+fork→exec http_client resolve; ARM64: inline UDP DNS |
 | `resolve_hostname(host)` | алиас для resolve |
+| `https.get(host, path)` | pipe+fork→exec /bin/sh -c "curl -s URL" (требуется curl) |
+| `https_get(host, path)` | алиас для https.get |
+| `httpsget(host, path)` | алиас для https.get |
+| `https.post(host, path, body)` | pipe+fork→exec /bin/sh -c "curl -s -X POST -d 'body' URL" |
+| `https_post(host, path, body)` | алиас для https.post |
+| `httpspost(host, path, body)` | алиас для https.post |
 | `guiApp()` / `guiapp()` | pipe + fork → exec gui_srv |
 
 **Графика (Framebuffer):**
@@ -1065,9 +1071,19 @@ width / height — размеры окна
 
 ## 13. Сеть и HTTP
 
+### Архитектура
+
+Сеть в dhjsjs реализована тремя способами:
+
+| Способ | Где используется | Описание |
+|--------|-----------------|----------|
+| fork+exec http_client | x86-64 Linux | pipe+fork+execve для HTTP и resolve |
+| Inline socket syscalls | ARM64 (Android) | Прямые сисвызовы socket/connect/send/recv, без fork |
+| fork+exec curl | Все платформы (HTTPS) | `/bin/sh -c "curl -s URL"` для HTTPS |
+
 ### http_client (исполняемый файл)
 
-`http_client.zig` (217 строк) — отдельный исполняемый файл, полноценный HTTP/1.0 клиент.
+`http_client.zig` (217 строк) — отдельный исполняемый файл, HTTP/1.0 клиент для x86-64 builtins.
 
 ```
 Использование: http_client <method> <host> [port] <path> [body]
@@ -1102,7 +1118,9 @@ Content-Type: application/x-www-form-urlencoded\r\n
 body
 ```
 
-### Схема работы fork+exec в builtins
+### x86-64: fork+exec для HTTP и resolve
+
+На x86-64 `http.get()`, `http.post()` и `resolve()` работают через fork+exec:
 
 ```
 Программа dhjsjs:
@@ -1120,17 +1138,54 @@ body
      │  close(rd)                         │
      │  dup2(wr, 1)  ← перенаправляет     │
      │                  stdout в pipe     │
-     │  execve("http_client",             │
-     │    ["http_client", "GET",          │
-     │     "example.com", "/", NULL])     │
+     │  execve("http_client", ...)        │
      └────────────────────────────────────┘
 ```
 
 Этот же механизм используется для `resolve()`, `guiApp()`, `wavplay()`, `mp3play()`.
 
+### ARM64: inline HTTP + DNS (compiler_arm.zig)
+
+На ARM64 (включая Android) `http.get()`, `http.post()` и `resolve()` генерируют inline машинный код — без fork+exec:
+
+**DNS resolve (`emitInlineResolveAarch64`):**
+1. Создаёт UDP socket (syscall 198)
+2. Отправляет DNS query на 8.8.8.8:53 (syscall 211 sendto)
+3. Ждёт ответ с таймаутом через ppoll (syscall 73)
+4. Читает ответ (syscall 212 recvfrom)
+5. Парсит DNS header (12 байт), вопрос, A-запись (type=1, class=1)
+6. Возвращает 4 байта IPv4 в X0
+
+**HTTP (`emitInlineHttpAarch64`):**
+1. Вызывает inline DNS resolve для преобразования hostname → IP
+2. Создаёт TCP socket (syscall 198)
+3. Подключается к серверу (syscall 203 connect)
+4. Отправляет HTTP/1.0 запрос (syscall 64 write)
+5. Читает ответ в цикле (syscall 63 read) до закрытия соединения
+6. Возвращает указатель на ответ (стековый буфер)
+
+### HTTPS: fork+exec curl
+
+На всех платформах `https.get()` и `https.post()` используют fork+exec `/bin/sh`:
+
+```
+  pipe() → fork()
+    child: dup2(pipe_write, 1), exec /bin/sh -c "curl -s URL"
+    parent: close(pipe_write), read(pipe_read), close(pipe_read), wait4()
+    возвращает ответ
+```
+
+Для POST тело передаётся через `-X POST -d 'body'`. Требуется установленный `curl` на целевой системе.
+
+**Команда curl:**
+- GET: `curl -s https://host/path`
+- POST: `curl -s -X POST -d 'body' https://host/path`
+
+Функция `emitForkExecCurlX64()` собирает команду на стеке, затем выполняет pipe+fork+exec.
+
 ### http.zig (клиент для IDE)
 
-`http.zig` (178 строк) — HTTP/1.1 клиент на сокетах (без fork+exec), используется непосредственно в IDE и инструментах.
+`http.zig` (178 строк) — HTTP/1.1 клиент на сокетах (без fork+exec), используется в IDE и инструментах. Это Zig-библиотека, не связанная с компилятором.
 
 ---
 
@@ -1192,6 +1247,166 @@ audio_play(fd)
 ### gui.zig — Immediate Mode GUI
 
 `gui.zig` (1531 строк) — библиотека виджетов, построенная по принципу Immediate Mode: каждый кадр программа заново описывает интерфейс. Виджеты не хранят состояние между кадрами.
+
+### mouse.zig — библиотека мыши
+
+`mouse.zig` — отдельный слой ввода для GUI, не использующий `std`, `builtin` или внешние библиотеки.
+
+#### Архитектура
+
+```
+Display Backend (X11/Wayland/Win32)
+    ↓ sys.Event (mouse_move, mouse_down, mouse_up, scroll)
+mouse.State.applyEvent(event)  ← обработка событий
+    ↓
+mouse.beginFrame() / mouse.endFrame()  ← подготовка кадра
+    ↓
+InputState.fromMouse(mouse.State)  ← мост в gui.zig
+    ↓
+Gui.widget(...)  ← виджеты используют состояние
+```
+
+#### Структура `mouse.State` (mouse.zig:39-63)
+
+```zig
+pub const State = struct {
+    x: i32, y: i32,           // текущая позиция курсора
+    dx: i32, dy: i32,          // смещение за кадр
+    wheel_x: i32, wheel_y: i32, // накопленный скролл
+    entered: bool, left: bool,  // вход/выход из окна
+    moved: bool,                // движение в этом кадре
+
+    // Удобные поля для PRIMARY (левой кнопки):
+    primary_down, primary_pressed, primary_released,
+    primary_clicked, primary_double_clicked: bool,
+
+    any_down, any_pressed, any_released: bool, // любая кнопка
+
+    capture_id: u32,   // ID виджета, захватившего мышь (0 = нет)
+    hover_id: u32,     // ID виджета под курсором
+
+    buttons: [MAX_BUTTONS+1]ButtonState, // состояние каждой кнопки (1-5)
+};
+```
+
+#### Структура `ButtonState` (mouse.zig:21-37)
+
+Хранит полное состояние одной кнопки мыши:
+
+| Поле | Описание |
+|------|----------|
+| `down` | Кнопка зажата |
+| `pressed` | Нажата в этом кадре (фронт) |
+| `released` | Отпущена в этом кадре (фронт) |
+| `clicked` | Отпущена без перетаскивания |
+| `double_clicked` | Двойной клик |
+| `dragging` | Идёт перетаскивание |
+| `drag_started` | Перетаскивание началось в этом кадре |
+| `drag_released` | Перетаскивание завершено отпусканием |
+| `press_x/y` | Координаты нажатия |
+| `release_x/y` | Координаты отпускания |
+| `last_click_x/y/frame` | Для детекции двойного клика |
+
+#### Детекция двойного клика (mouse.zig:280-286)
+
+Двойной клик определяется по трём критериям:
+- **Время:** не более `DOUBLE_CLICK_FRAMES = 24` кадров между кликами
+- **Расстояние:** не более `DOUBLE_CLICK_DIST = 4` пикселей от предыдущего клика
+- **Условие:** второй клик должен быть `clicked` (без перетаскивания)
+
+#### Перетаскивание (drag) (mouse.zig:297-309)
+
+Drag активируется при смещении более чем на `DRAG_THRESHOLD = 3` пикселя от точки нажатия. Проверка выполняется как при движении (`moveTo` → `updateDragFlags`), так и при отпускании (`release`).
+
+Вспомогательные функции:
+- `isDragging(btn)` — идёт ли перетаскивание
+- `dragStarted(btn)` — началось ли в этом кадре
+- `dragReleased(btn)` — завершилось ли отпусканием
+- `dragX(btn)` / `dragY(btn)` — смещение от точки нажатия
+
+#### Захват мыши (capture) (mouse.zig:161-171)
+
+Позволяет виджету удерживать мышь между кадрами:
+- `setCapture(id)` — захватить мышь
+- `releaseCapture(id)` — отпустить захват
+- `hasCapture(id)` — проверить, удерживает ли виджет захват
+
+**Авто-сброс:** в `endFrame()` capture_id сбрасывается в 0, если ни одна кнопка не зажата (`!any_down`).
+
+В `gui.zig` capture сохраняется между кадрами через `Gui.mouse_capture_id`: в `beginFrame()` он восстанавливается в `mouse_state.capture_id`, в `endFrame()` сохраняется обратно. Это гарантирует, что виджет, захвативший мышь в предыдущем кадре, продолжит получать события.
+
+#### Хит-тесты (mouse.zig:173-188)
+
+Три метода на `mouse.State`:
+
+| Метод | Описание |
+|-------|----------|
+| `hit(Rect)` | Проверка попадания курсора в прямоугольник |
+| `hot(id, Rect)` | Как `hit`, но если захват у другого виджета — возвращает false. Также устанавливает `hover_id`. |
+| `capturedOrHot(id, Rect)` | Если виджет владеет захватом — всегда true. Иначе `hot`. |
+
+Утилита `mouse.rect(x, y, w, h)` создаёт `Rect`.
+
+#### Событийный цикл
+
+Каждый кадр:
+1. `mouse.beginFrame()` — сбрасывает флаги-однодневки (`pressed`, `released`, `clicked`, `double_clicked`, `drag_started`, `drag_released`), обнуляет `wheel_*`, инкрементирует счётчик кадров
+2. Цикл `disp.pollEvent()` → `mouse.applyEvent(event)` — обрабатывает все накопленные события
+3. `mouse.endFrame()` — копирует per-button флаги в удобные поля (`primary_*`, `any_*`), авто-сброс capture
+4. `InputState.fromMouse(mouse_state)` — создаёт состояние ввода для gui.zig
+5. `gui.beginFrame(input_state)` — рисование виджетов
+6. `gui.endFrame()` — сохранение capture_id
+
+#### Обработка событий в бэкендах
+
+**X11** (display.zig:69-91): Button 4/5 → scroll вверх/вниз, Button 6/7 → scroll влево/вправо. Остальные кнопки → mouse_down/mouse_up.
+
+**Wayland** (wayland.zig:289-363): Pointer enter/motion → mouse_move (op 0, 2). Button press → mouse_down/mouse_up (op 3) с маппингом: 272→1(L), 273→3(R), 274→2(M), 275→X1, 276→X2. Axis → scroll (op 4).
+
+**Win32** (win32.zig:99-196): WM_MOUSEMOVE/LBUTTONDOWN/UP/RBUTTONDOWN/UP/MBUTTONDOWN/UP/XBUTTONDOWN/UP/MOUSEWHEEL/MOUSEHWHEEL → соответствующие Event.
+
+#### Миграция со старых полей
+
+`gui.zig` всё ещё содержит legacy-поля (`mouse_x`, `mouse_y`, `mouse_down`, `mouse_clicked`, `mouse_released`, `scroll`). В `beginFrame()` (gui.zig:682-687) они перекопируются из `mouse_state` для обратной совместимости. Большинство виджетов (`button`, `slider`, `checkbox`, `textInput`, `collapsible`, `comboBox`) продолжают использовать legacy-поля; `mouse_state` используется через `testHot()` и `setCapture/releaseCapture`.
+
+`gui_srv.zig` использует `mouse.State` напрямую (минуя `InputState`), так как его демо-режим (gui_srv.zig:285-354) был написан после внедрения `mouse.zig`.
+
+#### Полные примеры циклов
+
+**desktop_gui.zig (новый стиль):**
+```zig
+var m = mouse.State.init();
+while (!done) {
+    m.beginFrame();
+    while (disp.pollEvent()) |event| {
+        switch (event) {
+            .mouse_move, .mouse_down, .mouse_up, .scroll => m.applyEvent(event),
+            else => {}
+        }
+    }
+    m.endFrame();
+    var input = gui.InputState.fromMouse(m, ...);
+    gui.beginFrame(&input, ...);
+    // ... виджеты ...
+    gui.endFrame();
+}
+```
+
+**gui_demo.zig (новый стиль):**
+```zig
+var m = mouse.State.init();
+while (!should_close) {
+    m.beginFrame();
+    while (disp.pollEvent()) |event| {
+        switch (event) {
+            .mouse_move, .mouse_down, .mouse_up, .scroll => m.applyEvent(event),
+            else => {}
+        }
+    }
+    m.endFrame();
+    // ...
+}
+```
 
 ### Жизненный цикл GUI-программы
 
@@ -1391,7 +1606,9 @@ const AndroidCmd = extern struct {
 
 ### Android-специфичные builtins
 
-На Android `http.get()` и `http.post()` НЕ РАБОТАЮТ (fork+exec недоступен). Вместо них используются `android_http_get()` и `android_http_post()`, которые генерируют inline ARM64 код, выполняющий socket+connect+write+read без создания дочернего процесса.
+На Android `http.get()`, `http.post()` и `resolve()` РАБОТАЮТ через inline ARM64 код — они генерируют прямые сисвызовы socket/connect/send/recv и inline DNS-запросы без создания дочернего процесса.
+
+Также доступны низкоуровневые `android_http_get(ip, port, path)` и `android_http_post(ip, port, path, body)`, которые принимают IP как 32-битное число и не выполняют DNS — полезно, когда IP уже известен.
 
 ### android_styles.zig
 
@@ -1913,7 +2130,6 @@ http.get("host", "/path")
 
 ### Платформенные ограничения
 
-- `http.get()`, `http.post()` не работают на Android (fork+exec)
 - Аудио только через OSS (`/dev/dsp`), не ALSA/PulseAudio
 - GUI только через pipe-протокол с gui_srv
 - ESP32: только RISC-V 32-bit, не Xtensa
@@ -1959,7 +2175,7 @@ http_client      — HTTP клиент
 
 | Файл | Строк | Назначение |
 |------|-------|------------|
-| `compiler.zig` | 2785 | Компилятор x86-64 (AST → машкод) |
+| `compiler.zig` | 3179 | Компилятор x86-64 (AST → машкод) |
 | `gui.zig` | 1531 | Библиотека GUI-виджетов |
 | `compiler_arm.zig` | 1137 | Компилятор ARM64 |
 | `audio.zig` | 864 | Декодеры аудио + player |

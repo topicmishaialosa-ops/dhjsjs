@@ -6,6 +6,15 @@ const w32_mod = @import("win32.zig");
 
 pub const Event = sys.Event;
 
+const X11_EVENT_MASK: u32 =
+    1 |      // KeyPress
+    2 |      // KeyRelease
+    4 |      // ButtonPress
+    8 |      // ButtonRelease
+    64 |     // PointerMotion
+    32768 |  // Exposure
+    131072; // StructureNotify
+
 pub const DisplayBackend = struct {
     mode: u8,
     xconn: x11_mod.X11Conn,
@@ -21,7 +30,7 @@ pub const DisplayBackend = struct {
             db.xconn.setTitle("dhjsjs GUI");
             db.xconn.createGC();
             db.xconn.mapWindow();
-            db.xconn.selectInput(2 | 16 | 32 | 64 | 2048);
+            db.xconn.selectInput(X11_EVENT_MASK);
             return db;
         }
         var wl = wl_mod.WlConn.open(0);
@@ -63,12 +72,18 @@ pub const DisplayBackend = struct {
                      4 => {
                          if (ev.detail == 4) return Event{ .scroll = .{ .dx = 0, .dy = 1 } };
                          if (ev.detail == 5) return Event{ .scroll = .{ .dx = 0, .dy = -1 } };
-                         return Event{ .mouse_down = .{ .x = ev.event_x, .y = ev.event_y, .btn = ev.detail } };
+                         if (ev.detail == 6) return Event{ .scroll = .{ .dx = -1, .dy = 0 } };
+                         if (ev.detail == 7) return Event{ .scroll = .{ .dx = 1, .dy = 0 } };
+                         const btn: u8 = if (ev.detail == 8) 4 else if (ev.detail == 9) 5 else ev.detail;
+                         return Event{ .mouse_down = .{ .x = ev.event_x, .y = ev.event_y, .btn = btn } };
                      },
                      5 => {
                          if (ev.detail == 4) return null;
                          if (ev.detail == 5) return null;
-                         return Event{ .mouse_up = .{ .x = ev.event_x, .y = ev.event_y, .btn = ev.detail } };
+                         if (ev.detail == 6) return null;
+                         if (ev.detail == 7) return null;
+                         const btn: u8 = if (ev.detail == 8) 4 else if (ev.detail == 9) 5 else ev.detail;
+                         return Event{ .mouse_up = .{ .x = ev.event_x, .y = ev.event_y, .btn = btn } };
                      },
                      6 => return Event{ .mouse_move = .{ .x = ev.event_x, .y = ev.event_y } },
                      12 => return Event.expose,

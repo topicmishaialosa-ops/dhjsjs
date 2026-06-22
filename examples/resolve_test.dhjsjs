@@ -1,0 +1,9 @@
+fn main() int {
+    hui ip = resolve("example.com");
+    if ip == 0 {
+        print("FAIL: dns\n", 10);
+        return 1;
+    }
+    print("OK\n", 3);
+    return 0;
+}

@@ -70,6 +70,9 @@ pub const WM_RBUTTONUP: u32 = 517;
 pub const WM_MBUTTONDOWN: u32 = 519;
 pub const WM_MBUTTONUP: u32 = 520;
 pub const WM_MOUSEWHEEL: u32 = 522;
+pub const WM_XBUTTONDOWN: u32 = 523;
+pub const WM_XBUTTONUP: u32 = 524;
+pub const WM_MOUSEHWHEEL: u32 = 526;
 pub const WM_QUIT: u32 = 18;
 pub const PM_REMOVE: u32 = 1;
 pub const SRCCOPY: u32 = 0xCC0020;
@@ -137,6 +140,34 @@ fn wndProc(hWnd: usize, msg: u32, wParam: usize, lParam: usize) callconv(.Stdcal
             pushEvent(sys.Event{ .mouse_up = .{ .x = x, .y = y, .btn = 3 } });
             return 0;
         },
+        WM_MBUTTONDOWN => {
+            const x = @as(i32, @intCast(@as(u16, @truncate(lParam & 0xFFFF))));
+            const y = @as(i32, @intCast(@as(u16, @truncate((lParam >> 16) & 0xFFFF))));
+            pushEvent(sys.Event{ .mouse_down = .{ .x = x, .y = y, .btn = 2 } });
+            return 0;
+        },
+        WM_MBUTTONUP => {
+            const x = @as(i32, @intCast(@as(u16, @truncate(lParam & 0xFFFF))));
+            const y = @as(i32, @intCast(@as(u16, @truncate((lParam >> 16) & 0xFFFF))));
+            pushEvent(sys.Event{ .mouse_up = .{ .x = x, .y = y, .btn = 2 } });
+            return 0;
+        },
+        WM_XBUTTONDOWN => {
+            const x = @as(i32, @intCast(@as(u16, @truncate(lParam & 0xFFFF))));
+            const y = @as(i32, @intCast(@as(u16, @truncate((lParam >> 16) & 0xFFFF))));
+            const xb = @as(u16, @truncate(wParam >> 16));
+            const btn: u8 = if (xb == 1) 4 else 5;
+            pushEvent(sys.Event{ .mouse_down = .{ .x = x, .y = y, .btn = btn } });
+            return 1;
+        },
+        WM_XBUTTONUP => {
+            const x = @as(i32, @intCast(@as(u16, @truncate(lParam & 0xFFFF))));
+            const y = @as(i32, @intCast(@as(u16, @truncate((lParam >> 16) & 0xFFFF))));
+            const xb = @as(u16, @truncate(wParam >> 16));
+            const btn: u8 = if (xb == 1) 4 else 5;
+            pushEvent(sys.Event{ .mouse_up = .{ .x = x, .y = y, .btn = btn } });
+            return 1;
+        },
          WM_SIZE => {
              const new_w = @as(u32, @intCast(lParam & 0xFFFF));
              const new_h = @as(u32, @intCast((lParam >> 16) & 0xFFFF));
@@ -148,6 +179,14 @@ fn wndProc(hWnd: usize, msg: u32, wParam: usize, lParam: usize) callconv(.Stdcal
              const steps = delta / 120;
              if (steps != 0) {
                  pushEvent(sys.Event{ .scroll = .{ .dx = 0, .dy = steps } });
+             }
+             return 0;
+         },
+         WM_MOUSEHWHEEL => {
+             const delta = @as(i16, @truncate(@as(u16, @truncate(wParam >> 16))));
+             const steps = delta / 120;
+             if (steps != 0) {
+                 pushEvent(sys.Event{ .scroll = .{ .dx = steps, .dy = 0 } });
              }
              return 0;
          },

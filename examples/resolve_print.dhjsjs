@@ -1,0 +1,13 @@
+fn main() int {
+    hui ip = resolve("example.com");
+    if ip == 0 {
+        print("FAIL: dns\n", 10);
+        return 1;
+    }
+    // Print first byte of IP
+    hui b0 = ip & 0xFF;
+    hui ch = 48 + (b0 % 10);
+    syscall(64, 1, &ch, 1, 0, 0, 0);
+    print("\n", 1);
+    return 0;
+}

@@ -2786,6 +2786,8 @@ resolve_hostname(host)
 4. Парсит ответ
 5. Возвращает IP как 32-битное число
 
+**Как работает:** на x86-64 через fork+exec `http_client resolve`; на ARM64 через inline UDP DNS (syscalls socket/sendto/ppoll/recvfrom, без fork).
+
 **Примеры:**
 ```
 fn main() {
@@ -2828,11 +2830,9 @@ httpget(host, path)
 **Возвращаемое значение:** строка с ответом сервера
 
 **Описание:**
-1. Создаёт pipe
-2. Создаёт дочерний процесс через fork
-3. Дочерний процесс запускает `http_client` с аргументами
-4. Родитель читает ответ из pipe
-5. Буфер ответа живёт до следующего похожего вызова
+1. На x86-64: pipe + fork + exec `http_client` GET. Дочерний процесс запускает http_client, родитель читает ответ из pipe.
+2. На ARM64 (в т.ч. Android): inline ARM64 код — inline DNS resolution, socket, connect, write HTTP request, read response (без fork+exec).
+3. Буфер ответа живёт до следующего похожего вызова.
 
 **Примеры:**
 ```
@@ -2871,6 +2871,69 @@ httppost(host, path, body)
 ```
 fn main() {
     hui response = http.post("example.com", "/api", "data=hello&key=123")
+    print(response)
+}
+```
+
+---
+
+### 19.38.5 https.get — HTTPS GET запрос
+
+**Назначение:** Выполнить HTTPS GET запрос к серверу (через curl).
+
+**Синтаксис:**
+```
+https.get(host, path)
+https_get(host, path)
+httpsget(host, path)
+```
+
+**Аргументы:**
+- `host` — домен (`string`)
+- `path` — путь запроса (`string`): начинается с `/`
+
+**Возвращаемое значение:** строка с ответом сервера
+
+**Описание:**
+1. Создаёт pipe
+2. Создаёт дочерний процесс через fork
+3. Дочерний процесс запускает `/bin/sh -c "curl -s https://host/path"`
+4. Родитель читает ответ из pipe
+5. Требуется установленный `curl` на целевой системе
+6. Буфер ответа живёт до следующего похожего вызова
+
+**Примеры:**
+```
+fn main() {
+    hui response = https.get("example.com", "/")
+    print(response)
+}
+```
+
+---
+
+### 19.38.6 https.post — HTTPS POST запрос
+
+**Назначение:** Выполнить HTTPS POST запрос с телом (через curl).
+
+**Синтаксис:**
+```
+https.post(host, path, body)
+https_post(host, path, body)
+httpspost(host, path, body)
+```
+
+**Аргументы:**
+- `host` — домен (`string`)
+- `path` — путь запроса (`string`)
+- `body` — тело запроса (`string`)
+
+**Возвращаемое значение:** строка с ответом сервера
+
+**Примеры:**
+```
+fn main() {
+    hui response = https.post("api.example.com", "/data", "key=value")
     print(response)
 }
 ```
@@ -3473,7 +3536,11 @@ fn main() {
 
 ### 19.63 Android — HTTP
 
-**Назначение:** HTTP запросы на Android (без fork+exec).
+**Назначение:** HTTP запросы на Android.
+
+На Android `http.get(host, path)` и `http.post(host, path, body)` РАБОТАЮТ напрямую с доменными именами через inline ARM64 код (без fork+exec).
+
+Также доступны низкоуровневые версии, где IP передаётся числом:
 
 **Синтаксис:**
 ```

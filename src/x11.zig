@@ -174,10 +174,10 @@ pub const X11Conn = struct {
 
     pub fn selectInput(self: *X11Conn, mask: u32) void {
         var buf: [16]u8 = undefined;
-        buf[0] = 102; buf[1] = 0;
+        buf[0] = 2; buf[1] = 0;
         write16(&buf, 2, 4);
         write32(&buf, 4, self.wid);
-        write32(&buf, 8, 0);
+        write32(&buf, 8, 2048);
         write32(&buf, 12, mask);
         writeAll(self.fd, &buf);
     }
@@ -296,8 +296,8 @@ pub const X11Conn = struct {
         if (t == 2) return XEvent{ .type = 2, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
         if (t == 3) return XEvent{ .type = 3, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
         if (t == 33) return XEvent{ .type = 33, .keycode = 0, .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
-        if (t == 4 or t == 5) return XEvent{ .type = t, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 4), .event_y = readI16(&buf, 6) };
-        if (t == 6) return XEvent{ .type = 6, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 4), .event_y = readI16(&buf, 6) };
+        if (t == 4 or t == 5) return XEvent{ .type = t, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 24), .event_y = readI16(&buf, 26) };
+        if (t == 6) return XEvent{ .type = 6, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 24), .event_y = readI16(&buf, 26) };
         return null;
     }
 

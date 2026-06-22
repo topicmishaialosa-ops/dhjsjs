@@ -3,6 +3,7 @@ const gfx = @import("render.zig");
 const gui_mod = @import("gui.zig");
 const gui_ext = @import("gui_ext.zig");
 const display_mod = @import("display.zig");
+const mouse_mod = @import("mouse.zig");
 
 const W: u32 = 900;
 const H: u32 = 640;
@@ -94,12 +95,7 @@ pub fn main() void {
     const styles = allStyles();
     var style_idx: usize = 0;
 
-    var mouse_x: i32 = 0;
-    var mouse_y: i32 = 0;
-    var mouse_down = false;
-    var mouse_clicked = false;
-    var mouse_released = false;
-    var scroll_delta: i32 = 0;
+    var mouse = mouse_mod.State.init();
 
     var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
@@ -113,9 +109,7 @@ pub fn main() void {
 
     var running = true;
     while (running) {
-        mouse_clicked = false;
-        mouse_released = false;
-        scroll_delta = 0;
+        mouse.beginFrame();
 
         while (disp.pollEvent()) |event| {
             switch (event) {
@@ -126,24 +120,21 @@ pub fn main() void {
                 .key_release => |kc| {
                     if (kc < gui_mod.MAX_KEY) key_state[kc] = false;
                 },
-                .mouse_move => |m| { mouse_x = m.x; mouse_y = m.y; },
-                .mouse_down => |m| { mouse_x = m.x; mouse_y = m.y; mouse_down = true; mouse_clicked = true; },
-                .mouse_up => |m| { mouse_x = m.x; mouse_y = m.y; mouse_down = false; mouse_released = true; },
+                .mouse_move, .mouse_down, .mouse_up, .scroll => mouse.applyEvent(event),
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
-                .scroll => |s| { scroll_delta += s.dy; },
             }
         }
+        mouse.endFrame();
 
-        const input = gui_mod.InputState{
-            .mouse_x = mouse_x, .mouse_y = mouse_y,
-            .mouse_down = mouse_down, .mouse_clicked = mouse_clicked,
-            .mouse_released = mouse_released, .scroll = scroll_delta,
-            .keys = key_state,
-            .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
-            .text_input = [_]u8{0} ** 16, .text_len = 0,
-        };
+        const input = gui_mod.InputState.fromMouse(
+            mouse,
+            key_state,
+            [_]bool{false} ** gui_mod.MAX_KEY,
+            [_]u8{0} ** 16,
+            0,
+        );
 
         gui.beginFrame(&fb, input);
 
@@ -187,9 +178,9 @@ pub fn main() void {
             var buf: [64]u8 = undefined;
             var len: usize = 0;
             for ("Mouse: ") |c| { if (len < 60) { buf[len] = c; len += 1; } }
-            len += itoa(mouse_x, buf[len..]);
+            len += itoa(mouse.x, buf[len..]);
             for (", ") |c| { if (len < 60) { buf[len] = c; len += 1; } }
-            len += itoa(mouse_y, buf[len..]);
+            len += itoa(mouse.y, buf[len..]);
             gui.label(buf[0..len]);
         }
         gui.endWindow();
@@ -201,9 +192,9 @@ pub fn main() void {
         gui.separator();
         gui.label("Radio Buttons:");
         var radio_sel: u32 = 0;
-        gui_ext.drawRadioButton(&fb, 8, 256, 260, 20, 0, 0, &radio_sel, &gui.style, mouse_x, mouse_y, mouse_clicked);
-        gui_ext.drawRadioButton(&fb, 8, 278, 260, 20, 0, 1, &radio_sel, &gui.style, mouse_x, mouse_y, mouse_clicked);
-        gui_ext.drawRadioButton(&fb, 8, 300, 260, 20, 0, 2, &radio_sel, &gui.style, mouse_x, mouse_y, mouse_clicked);
+        gui_ext.drawRadioButton(&fb, 8, 256, 260, 20, 0, 0, &radio_sel, &gui.style, mouse.x, mouse.y, mouse.primary_pressed);
+        gui_ext.drawRadioButton(&fb, 8, 278, 260, 20, 0, 1, &radio_sel, &gui.style, mouse.x, mouse.y, mouse.primary_pressed);
+        gui_ext.drawRadioButton(&fb, 8, 300, 260, 20, 0, 2, &radio_sel, &gui.style, mouse.x, mouse.y, mouse.primary_pressed);
         gui.endWindow();
 
         // Style switcher

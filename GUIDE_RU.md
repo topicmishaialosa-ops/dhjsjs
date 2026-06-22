@@ -535,8 +535,11 @@ dhjsjs_cc build hello.dhjs -o hello --release  # режим релиза
 | `send(fd, buf, len, flags)` | Отправить данные |
 | `recv(fd, buf, len, flags)` | Получить данные |
 | `resolve(hostname)` | Получить IP домена (4 байта) |
+| `resolve_hostname(hostname)` | Алиас для resolve |
 | `http.get(host, path)` | HTTP GET запрос |
 | `http.post(host, path, body)` | HTTP POST запрос |
+| `https.get(host, path)` | HTTPS GET запрос (через curl) |
+| `https.post(host, path, body)` | HTTPS POST запрос (через curl) |
 | `pipe(fds)` | Создать канал (pipe) |
 | `dup(fd)` | Копировать файловый дескриптор |
 | `dup2(oldfd, newfd)` | Перенаправить fd |
@@ -585,6 +588,9 @@ dhjsjs_cc build hello.dhjs -o hello --release  # режим релиза
 | `android_touch_x()` | X касания |
 | `android_touch_y()` | Y касания |
 | `android_touch_down()` | Нажат ли экран |
+| `android_clicked()` | `1` если было нажатие в этом кадре (фронт `touch_down`) |
+| `android_click_x()` | X координата последнего нажатия |
+| `android_click_y()` | Y координата последнего нажатия |
 | `android_should_finish()` | Надо ли закрыться |
 | `android_has_focus()` | Есть ли фокус |
 
@@ -620,18 +626,44 @@ fn main() {
 }
 ```
 
-Эта функция:
+**Как работает http.get на x86-64 Linux:**
 1. Создаёт pipe (канал)
 2. Делает fork (создаёт дочерний процесс)
 3. В дочернем процессе запускает `http_client`
-4. http_client делает DNS запрос, подключается к серверу, отправляет HTTP запрос
+4. http_client делает DNS запрос (через `/etc/hosts`, `/etc/resolv.conf` или UDP к 8.8.8.8:53), подключается к серверу, отправляет HTTP/1.0 запрос
 5. Результат читается из pipe
+
+**Как работает http.get на ARM64 (в т.ч. Android):**
+1. Генерирует inline ARM64 код с прямыми сисвызовами (без fork+exec)
+2. Выполняет DNS-запрос через UDP к 8.8.8.8:53 (inline код)
+3. Создаёт сокет, подключается, отправляет HTTP запрос
+4. Читает ответ и возвращает его
 
 ### HTTP POST запрос
 
 ```
 fn main() {
     hui response = http.post("example.com", "/api", "data=hello&key=123")
+    print(response)
+}
+```
+
+### HTTPS GET запрос
+
+```
+fn main() {
+    hui response = https.get("google.com", "/")
+    print(response)
+}
+```
+
+**Важно:** `https.get` использует fork+exec `/bin/sh -c "curl -s URL"`. На системе должен быть установлен `curl`.
+
+### HTTPS POST запрос
+
+```
+fn main() {
+    hui response = https.post("example.com", "/api", "data=hello&key=123")
     print(response)
 }
 ```
@@ -668,6 +700,7 @@ GUI в dhjsjs работает через отдельный процесс `gui
 - **Современные темы**: Доступны пресеты `style_modern_dark` и `style_modern_light` для современного вида интерфейса
 - **Карточки**: Функция `drawCard()` позволяет создавать панельки с закруглёнными углами и тенью, подобно материальному дизайну
 - **Смена темы во время выполнения**: Встроенная функция `setTheme(fd, theme_id)` позволяет менять тему интерфейса 'на лету'
+- **Полная мышь**: Внутренняя библиотека `mouse.zig` нормализует левую/среднюю/правую/X-кнопки, вертикальный и горизонтальный scroll, click/release, double-click, drag и capture для виджетов.
 
 ### Простое окно с кнопкой
 
@@ -709,6 +742,50 @@ fn main() {
 | `sameLine(spacing)` | Следующий виджет в той же строке |
 | `addSpace(w, h)` | Пустое место |
 > **Примечание:** Также доступна функция `drawCard()` для создания панелек с закруглёнными углами и тенью, а также пресеты современных тем `style_modern_dark` и `style_modern_light`.
+
+### Мышь в GUI
+
+Система мыши (`mouse.zig`) обрабатывает все события от бэкендов (X11, Wayland, Win32) и предоставляет виджетам состояние мыши каждый кадр.
+
+**Кнопки:**
+- `1` — левая (PRIMARY)
+- `2` — средняя (MIDDLE)
+- `3` — правая (SECONDARY)
+- `4` — X1 (назад)
+- `5` — X2 (вперёд)
+
+**Состояния для каждой кнопки:**
+- `pressed` — нажата в этом кадре
+- `released` — отпущена в этом кадре
+- `clicked` — отпущена без перетаскивания (клик)
+- `double_clicked` — двойной клик (до 24 кадров, в радиусе 4 пикселей)
+
+**Колёсико мыши:**
+- Вертикальный скролл — `scroll`
+- Горизонтальный скролл — `wheel_x`
+
+**Перетаскивание (drag):**
+Начинается, если курсор сдвинут более чем на 3 пикселя при нажатой кнопке. Виджеты могут отслеживать `dragX`/`dragY` — смещение от точки нажатия.
+
+**Захват мыши (capture):**
+Виджет может захватить мышь (`setCapture`), чтобы продолжать получать события даже при выходе курсора за его границы. Захват автоматически снимается при отпускании кнопки.
+
+**Пример использования в коде:**
+```
+fn main() {
+    guiApp()
+    hui clicks = 0
+    while true {
+        guiServer()  // обрабатывает события мыши
+        beginWindow("Демо", 100, 100, 300, 200, true)
+        if button("Клик: " + clicks) {
+            clicks = clicks + 1
+        }
+        label("Нажми на кнопку!")
+        endWindow()
+    }
+}
+```
 
 ### Пример использования современных тем
 
@@ -908,21 +985,34 @@ fn main() {
 
 ### HTTP запросы на Android
 
-На Android доступны специальные встроенные функции для HTTP-запросов, которые работают без fork+exec (через inline ARM64 код):
+На Android `http.get()` и `http.post()` работают через inline ARM64 код (без fork+exec). Они поддерживают доменные имена:
 
 ```
 fn main() {
-    // GET запрос (IP должен быть в виде числа, например 0x0100007F для 127.0.0.1)
-    hui response = android_http_get(0x0100007F, 80, "/")
+    // GET запрос с доменным именем
+    hui response = http.get("example.com", "/")
     print(response)
 
     // POST запрос
+    hui response = http.post("example.com", "/api", "data=hello")
+    print(response)
+}
+```
+
+Также доступны низкоуровневые `android_http_get(ip, port, path)` и `android_http_post(ip, port, path, body)`, где IP задаётся числом:
+
+```
+fn main() {
+    // 127.0.0.1 = 0x0100007F
+    hui response = android_http_get(0x0100007F, 80, "/")
+    print(response)
+
     hui response = android_http_post(0x0100007F, 80, "/api", "data=hello")
     print(response)
 }
 ```
 
-> **Важно:** На Android обычные `http.get()` и `http.post()` НЕ работают через fork+exec. Используйте `android_http_get()` и `android_http_post()` — они генерируют inline ARM64 код с `socket()` + `connect()` + `write()` + `read()` и возвращают HTTP/1.0 ответ.
+> **Примечание:** `http.get()` и `http.post()` на Android автоматически резолвят доменные имена через inline DNS (UDP к 8.8.8.8:53). `android_http_get()` и `android_http_post()` принимают IP как 32-битное число и не требуют DNS.
 
 ---
 
@@ -1562,14 +1652,20 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `accept(fd)` | принять клиента |
 | `send(fd, buf, len, flags)` | отправить |
 | `recv(fd, buf, len, flags)` | принять |
-| `resolve(host)` | DNS resolve через `http_client resolve` |
+| `resolve(host)` | DNS resolve (x86: fork+exec http_client, ARM64: inline UDP DNS) |
 | `resolve_hostname(host)` | alias для `resolve` |
-| `http.get(host, path)` | GET через native HTTP client |
+| `http.get(host, path)` | GET (x86: fork+exec http_client, ARM64: inline socket+DNS) |
 | `http_get(host, path)` | alias |
 | `httpget(host, path)` | alias |
-| `http.post(host, path, body)` | POST через native HTTP client |
+| `http.post(host, path, body)` | POST (x86: fork+exec http_client, ARM64: inline socket+DNS) |
 | `http_post(host, path, body)` | alias |
 | `httppost(host, path, body)` | alias |
+| `https.get(host, path)` | HTTPS GET (fork+exec curl -s URL) |
+| `https_get(host, path)` | alias |
+| `httpsget(host, path)` | alias |
+| `https.post(host, path, body)` | HTTPS POST (fork+exec curl -s -X POST -d body URL) |
+| `https_post(host, path, body)` | alias |
+| `httpspost(host, path, body)` | alias |
 
 `http.get` и `http.post` возвращают указатель на строку ответа. Буфер живёт до следующего похожего вызова/перезаписи стека, поэтому сохраняйте нужные данные сразу.
 
@@ -1651,6 +1747,9 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `android_touch_x()` | X первого касания |
 | `android_touch_y()` | Y первого касания |
 | `android_touch_down()` | есть ли касание |
+| `android_clicked()` | `1` если было нажатие в этом кадре |
+| `android_click_x()` | X последнего нажатия |
+| `android_click_y()` | Y последнего нажатия |
 | `android_fb_ptr()` | указатель framebuffer |
 | `android_stride()` | stride framebuffer |
 | `android_pixel(x, y, color)` | пиксель |
@@ -1664,6 +1763,7 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `android_http_post(ip, port, path, body)` | HTTP POST без fork+exec |
 
 Индексы касаний начинаются с 0. Всегда проверяйте `i < android_touch_count()`.
+Для детекции клика используйте `android_clicked()` вместо ручного отслеживания `touch_down`.
 
 ---
 
@@ -1993,6 +2093,8 @@ Display layer нормализует события:
 | Android | touch arrays в `AndroidCmd` |
 
 GUI получает уже нормализованное состояние мыши/scroll/touch.
+
+`mouse.zig` хранит состояние ввода по кадрам: `x/y`, `dx/dy`, `wheel_x/wheel_y`, `primary_down`, `primary_pressed`, `primary_released`, `primary_clicked`, `primary_double_clicked`, массив `buttons[1..8]`, drag-флаги и `capture_id`. GUI использует это состояние для hover, кнопок, слайдеров, перетаскивания окон и resize. Старые поля `mouse_x`, `mouse_y`, `mouse_clicked` остаются совместимым слоем.
 
 ### Что проверять перед коммитом
 

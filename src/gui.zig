@@ -1,4 +1,5 @@
 const gfx = @import("render.zig");
+pub const mouse = @import("mouse.zig");
 
 pub const MAX_ID_STACK: usize = 64;
 pub const MAX_LAYOUT_STACK: usize = 64;
@@ -531,6 +532,12 @@ pub const WidgetState = struct {
     text_cursor: usize,
     float_val: f32,
     bool_val: bool,
+    rect_x: i32,
+    rect_y: i32,
+    rect_w: u32,
+    rect_h: u32,
+    aux_x: i32,
+    aux_y: i32,
 };
 
 pub const LayoutMode = enum(u8) {
@@ -575,6 +582,23 @@ pub const InputState = struct {
     keys_pressed: [MAX_KEY]bool,
     text_input: [16]u8,
     text_len: usize,
+    mouse_state: mouse.State,
+
+    pub fn fromMouse(m: mouse.State, keys: [MAX_KEY]bool, keys_pressed: [MAX_KEY]bool, text_input: [16]u8, text_len: usize) InputState {
+        return InputState{
+            .mouse_x = m.x,
+            .mouse_y = m.y,
+            .mouse_down = m.primary_down,
+            .mouse_clicked = m.primary_pressed,
+            .mouse_released = m.primary_released,
+            .scroll = m.wheel_y,
+            .keys = keys,
+            .keys_pressed = keys_pressed,
+            .text_input = text_input,
+            .text_len = text_len,
+            .mouse_state = m,
+        };
+    }
 };
 
 pub const Gui = struct {
@@ -598,6 +622,7 @@ pub const Gui = struct {
     active_id: u32,
     focus_id: u32,
     last_active_id: u32,
+    mouse_capture_id: u32,
     next_id_counter: u32,
     frame_count: u64,
     clip_rect: gfx.Rect,
@@ -614,6 +639,7 @@ pub const Gui = struct {
                 .keys_pressed = [_]bool{false} ** MAX_KEY,
                 .text_input = [_]u8{0} ** 16,
                 .text_len = 0,
+                .mouse_state = mouse.State.init(),
             },
             .id_stack = [_]u32{0} ** MAX_ID_STACK,
             .id_depth = 0,
@@ -631,12 +657,15 @@ pub const Gui = struct {
                 .text_buf = [_]u8{0} ** 256,
                 .text_len = 0, .text_cursor = 0,
                 .float_val = 0, .bool_val = false,
+                .rect_x = 0, .rect_y = 0, .rect_w = 0, .rect_h = 0,
+                .aux_x = 0, .aux_y = 0,
             }} ** MAX_STATE_ITEMS,
             .state_count = 0,
             .hot_id = 0,
             .active_id = 0,
             .focus_id = 0,
             .last_active_id = 0,
+            .mouse_capture_id = 0,
             .next_id_counter = 1,
             .frame_count = 0,
             .clip_rect = gfx.Rect{ .x = 0, .y = 0, .w = 0, .h = 0 },
@@ -650,6 +679,13 @@ pub const Gui = struct {
     pub fn beginFrame(self: *Gui, fb: *gfx.Framebuffer, input: InputState) void {
         self.fb = fb;
         self.input = input;
+        self.input.mouse_x = input.mouse_state.x;
+        self.input.mouse_y = input.mouse_state.y;
+        self.input.mouse_down = input.mouse_state.primary_down;
+        self.input.mouse_clicked = input.mouse_state.primary_pressed;
+        self.input.mouse_released = input.mouse_state.primary_released;
+        self.input.scroll = input.mouse_state.wheel_y;
+        self.input.mouse_state.capture_id = self.mouse_capture_id;
         self.frame_count += 1;
         self.hot_id = 0;
         self.next_id_counter = 1;
@@ -668,6 +704,7 @@ pub const Gui = struct {
         if (self.active_id != 0 and !self.input.mouse_down) {
             self.active_id = 0;
         }
+        self.mouse_capture_id = self.input.mouse_state.capture_id;
     }
 
     fn nextId(self: *Gui) u32 {
@@ -689,6 +726,8 @@ pub const Gui = struct {
                 .text_buf = [_]u8{0} ** 256,
                 .text_len = 0, .text_cursor = 0,
                 .float_val = 0, .bool_val = false,
+                .rect_x = 0, .rect_y = 0, .rect_w = 0, .rect_h = 0,
+                .aux_x = 0, .aux_y = 0,
             };
             return &self.state_items[idx];
         }
@@ -700,9 +739,7 @@ pub const Gui = struct {
     fn isFocused(self: *Gui, id: u32) bool { return self.focus_id == id; }
 
     fn testHot(self: *Gui, id: u32, x: i32, y: i32, w: u32, h: u32) bool {
-        if (self.input.mouse_x >= x and self.input.mouse_x < x + @as(i32, @intCast(w)) and
-            self.input.mouse_y >= y and self.input.mouse_y < y + @as(i32, @intCast(h)))
-        {
+        if (self.input.mouse_state.hot(id, mouse.rect(x, y, w, h))) {
             self.hot_id = id;
             return true;
         }
@@ -729,10 +766,14 @@ pub const Gui = struct {
 
         if (hovered and self.input.mouse_clicked) {
             self.active_id = id;
+            self.input.mouse_state.setCapture(id);
+            self.mouse_capture_id = id;
         }
         if (self.isActive(id) and self.input.mouse_released) {
             if (hovered) clicked = true;
             self.active_id = 0;
+            self.input.mouse_state.releaseCapture(id);
+            self.mouse_capture_id = 0;
         }
 
         const active = self.isActive(id);
@@ -954,6 +995,8 @@ pub const Gui = struct {
 
         if (hovered and self.input.mouse_clicked) {
             self.active_id = widget_id;
+            self.input.mouse_state.setCapture(widget_id);
+            self.mouse_capture_id = widget_id;
         }
 
         if (self.isActive(widget_id)) {
@@ -966,6 +1009,8 @@ pub const Gui = struct {
             }
             if (!self.input.mouse_down) {
                 self.active_id = 0;
+                self.input.mouse_state.releaseCapture(widget_id);
+                self.mouse_capture_id = 0;
             }
         }
 
@@ -1226,16 +1271,23 @@ pub const Gui = struct {
     pub fn beginWindow(self: *Gui, title: []const u8, x: i32, y: i32, w: u32, h: u32, resizable: bool) bool {
         const id = self.nextId();
         const title_h: i32 = 28;
-        var win_x = x;
-        var win_y = y;
-        var win_w = w;
-        var win_h = h;
+        const win_state = self.getOrCreateState(id, .none);
+        if (win_state.rect_w == 0 or win_state.rect_h == 0) {
+            win_state.rect_x = x;
+            win_state.rect_y = y;
+            win_state.rect_w = w;
+            win_state.rect_h = h;
+        }
+        var win_x = win_state.rect_x;
+        var win_y = win_state.rect_y;
+        var win_w = win_state.rect_w;
+        var win_h = win_state.rect_h;
 
         if (self.window_depth < MAX_WINDOW_STACK) {
             var ws = WindowState{
                 .x = win_x, .y = win_y, .w = win_w, .h = win_h,
                 .title_h = title_h,
-                .dragging = false, .drag_off_x = 0, .drag_off_y = 0,
+                .dragging = win_state.bool_val, .drag_off_x = win_state.aux_x, .drag_off_y = win_state.aux_y,
                 .id = id,
             };
 
@@ -1245,9 +1297,14 @@ pub const Gui = struct {
 
             if (hover_title and self.input.mouse_clicked) {
                 self.active_id = drag_id;
+                self.input.mouse_state.setCapture(drag_id);
+                self.mouse_capture_id = drag_id;
                 ws.dragging = true;
                 ws.drag_off_x = self.input.mouse_x - win_x;
                 ws.drag_off_y = self.input.mouse_y - win_y;
+                win_state.bool_val = true;
+                win_state.aux_x = ws.drag_off_x;
+                win_state.aux_y = ws.drag_off_y;
             }
 
             if (ws.dragging and self.isActive(drag_id)) {
@@ -1255,10 +1312,17 @@ pub const Gui = struct {
                 win_y = self.input.mouse_y - ws.drag_off_y;
                 ws.x = win_x;
                 ws.y = win_y;
+                win_state.rect_x = win_x;
+                win_state.rect_y = win_y;
                 if (!self.input.mouse_down) {
                     ws.dragging = false;
+                    win_state.bool_val = false;
                     self.active_id = 0;
+                    self.input.mouse_state.releaseCapture(drag_id);
+                    self.mouse_capture_id = 0;
                 }
+            } else if (!self.input.mouse_down and win_state.bool_val) {
+                win_state.bool_val = false;
             }
 
             self.window_stack[self.window_depth] = ws;
@@ -1290,6 +1354,8 @@ pub const Gui = struct {
             _ = self.testHot(resize_id, win_x + @as(i32, @intCast(win_w)) - rs, win_y + @as(i32, @intCast(win_h)) - rs, @as(u32, @intCast(rs)), @as(u32, @intCast(rs)));
             if (self.isHot(resize_id) and self.input.mouse_clicked) {
                 self.active_id = resize_id;
+                self.input.mouse_state.setCapture(resize_id);
+                self.mouse_capture_id = resize_id;
             }
             if (self.isActive(resize_id)) {
                 const new_w = @max(100, self.input.mouse_x - win_x);
@@ -1300,8 +1366,12 @@ pub const Gui = struct {
                 }
                 win_w = @as(u32, @intCast(new_w));
                 win_h = @as(u32, @intCast(new_h));
+                win_state.rect_w = win_w;
+                win_state.rect_h = win_h;
                 if (!self.input.mouse_down) {
                     self.active_id = 0;
+                    self.input.mouse_state.releaseCapture(resize_id);
+                    self.mouse_capture_id = 0;
                 }
             }
             drawLineRaw(self.fb, win_x + @as(i32, @intCast(win_w)) - 11, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 11, self.style.text_dim);

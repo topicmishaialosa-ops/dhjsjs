@@ -218,7 +218,7 @@ pub fn main() void {
         xconn.createWindow(0, 0, @as(u16, @intCast(WIDTH)), @as(u16, @intCast(HEIGHT)));
         xconn.setTitle("dhjsjs IDE");
         xconn.createGC();
-        xconn.selectInput(2 | 2048 | 16 | 32 | 64);
+        xconn.selectInput(1 | 2 | 4 | 8 | 64 | 32768 | 131072);
         xconn.mapWindow();
 
         var running = true;

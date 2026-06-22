@@ -1,6 +1,7 @@
 const sys = @import("sys.zig");
 const gfx = @import("render.zig");
 const display_mod = @import("display.zig");
+const mouse_mod = @import("mouse.zig");
 
 const W: u32 = 800;
 const H: u32 = 600;
@@ -21,6 +22,8 @@ const CMD_FILL_GRADIENT_H: u8 = 10;
 const CMD_FILL_GRADIENT_V: u8 = 11;
 const CMD_WAIT: u8 = 12;
 const CMD_SET_THEME: u8 = 13;
+const CMD_SET_STYLE_COLOR: u8 = 14;
+const CMD_SET_STYLE_ROUNDING: u8 = 15;
 
 var BG: u32 = 0xFF1E1E1E;
 var PANEL_BG: u32 = 0xFF2D2D2D;
@@ -282,30 +285,25 @@ fn u32ToColor(c: u32) gfx.Color {
 }
 
 fn demoMode(fb: *gfx.Framebuffer, disp: *display_mod.DisplayBackend) void {
-    var mx: i32 = 0;
-    var my: i32 = 0;
-    var mdown = false;
-    var mclicked = false;
+    var mouse = mouse_mod.State.init();
     var click_count: u32 = 0;
     var slider_val: f64 = 0.5;
     var check_val = false;
     var running = true;
 
     while (running) {
-        mclicked = false;
+        mouse.beginFrame();
         while (disp.pollEvent()) |ev| {
             switch (ev) {
                 .key_press => |kc| { if (kc == 9) running = false; },
                 .key_release => {},
-                .mouse_move => |m| { mx = m.x; my = m.y; },
-                .mouse_down => |m| { mx = m.x; my = m.y; mdown = true; mclicked = true; },
-                .mouse_up => |m| { mx = m.x; my = m.y; mdown = false; },
+                .mouse_move, .mouse_down, .mouse_up, .scroll => mouse.applyEvent(ev),
                 .close => running = false,
                 .expose => {},
                 .resize => {},
-                .scroll => {},
             }
         }
+        mouse.endFrame();
 
         fillRect(fb, 0, 0, W, H, BG);
 
@@ -317,9 +315,9 @@ fn demoMode(fb: *gfx.Framebuffer, disp: *display_mod.DisplayBackend) void {
         const by: i32 = 50;
         const bw: u32 = 120;
         const bh: u32 = 30;
-        const btn_hovered = mx >= bx and mx < bx + @as(i32, @intCast(bw)) and my >= by and my < by + @as(i32, @intCast(bh));
+        const btn_hovered = mouse.hit(mouse_mod.rect(bx, by, bw, bh));
         drawBtn(fb, bx, by, bw, bh, "Click me!", btn_hovered);
-        if (btn_hovered and mclicked) click_count += 1;
+        if (btn_hovered and mouse.primary_pressed) click_count += 1;
 
         var cnt_buf: [32]u8 = undefined;
         var cnt_pos: usize = 0;
@@ -336,17 +334,18 @@ fn demoMode(fb: *gfx.Framebuffer, disp: *display_mod.DisplayBackend) void {
         drawText(fb, cnt_buf[0..cnt_pos], 70, 90, ACCENT, 8);
 
         // Slider
-        drawSlider(fb, 20, 120, 200, 12, slider_val, "Volume", mx >= 20 and mx < 220 and my >= 134 and my < 142);
-        if (mdown and mx >= 20 and mx < 220 and my >= 134 and my < 142) {
-            slider_val = @as(f64, @floatFromInt(mx - 20)) / 200.0;
+        const slider_hovered = mouse.hit(mouse_mod.rect(20, 134, 200, 8));
+        drawSlider(fb, 20, 120, 200, 12, slider_val, "Volume", slider_hovered);
+        if (mouse.primary_down and slider_hovered) {
+            slider_val = @as(f64, @floatFromInt(mouse.x - 20)) / 200.0;
             if (slider_val < 0.0) slider_val = 0.0;
             if (slider_val > 1.0) slider_val = 1.0;
         }
 
         // Checkbox
-        const chk_hovered = mx >= 20 and mx < 250 and my >= 156 and my < 170;
+        const chk_hovered = mouse.hit(mouse_mod.rect(20, 156, 230, 14));
         drawCheckbox(fb, 20, 156, "Enable feature", check_val, chk_hovered);
-        if (chk_hovered and mclicked) check_val = !check_val;
+        if (chk_hovered and mouse.primary_pressed) check_val = !check_val;
 
         // Info
         drawLabel(fb, 20, 200, "Press Escape to close");
@@ -377,10 +376,7 @@ pub fn main() void {
 
     var widgets: [MAX_WIDGETS]Widget = undefined;
 
-    var mx: i32 = 0;
-    var my: i32 = 0;
-    var mdown = false;
-    var mclicked = false;
+    var mouse = mouse_mod.State.init();
     var key_state: [256]bool = [_]bool{false} ** 256;
 
     var running = true;
@@ -409,6 +405,28 @@ pub fn main() void {
                         }
                     }
                 }
+                continue;
+            }
+            if (cmd.type == CMD_SET_STYLE_COLOR) {
+                const field_id = @as(u32, @intCast(cmd.id));
+                const color = @as(u32, @intCast(@as(u64, @bitCast(cmd.val))));
+                switch (field_id) {
+                    0 => BG = 0xFF000000 | color,
+                    1 => PANEL_BG = 0xFF000000 | color,
+                    2 => BTN_BG = 0xFF000000 | color,
+                    3 => BTN_HOVER = 0xFF000000 | color,
+                    4 => TEXT_COL = 0xFF000000 | color,
+                    5 => ACCENT = 0xFF000000 | color,
+                    6 => BORDER = 0xFF000000 | color,
+                    7 => CHECK_MARK = 0xFF000000 | color,
+                    8 => INPUT_BG = 0xFF000000 | color,
+                    9 => SEPARATOR = 0xFF000000 | color,
+                    else => {},
+                }
+                continue;
+            }
+            if (cmd.type == CMD_SET_STYLE_ROUNDING) {
+                // Stub — rounding not used in gui_srv's simple renderer
                 continue;
             }
             if (cmd.type == CMD_SET_THEME) {
@@ -479,7 +497,7 @@ pub fn main() void {
             continue;
         }
 
-        mclicked = false;
+        mouse.beginFrame();
 
         while (disp.pollEvent()) |ev| {
             switch (ev) {
@@ -488,15 +506,13 @@ pub fn main() void {
                     if (kc < 256) key_state[kc] = true;
                 },
                 .key_release => |kc| { if (kc < 256) key_state[kc] = false; },
-                .mouse_move => |m| { mx = m.x; my = m.y; },
-                .mouse_down => |m| { mx = m.x; my = m.y; mdown = true; mclicked = true; },
-                .mouse_up => |m| { mx = m.x; my = m.y; mdown = false; },
+                .mouse_move, .mouse_down, .mouse_up, .scroll => mouse.applyEvent(ev),
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
-                .scroll => |s| { _ = s; },
             }
         }
+        mouse.endFrame();
 
         fillRect(&fb, 0, 0, W, H, BG);
 
@@ -507,9 +523,8 @@ pub fn main() void {
         while (i < wc) : (i += 1) {
             const w = &widgets[i];
             const label = w.label[0..w.label_len];
-            const hovered = mx >= w.x and mx < w.x + @as(i32, @intCast(w.w)) and
-                my >= w.y and my < w.y + @as(i32, @intCast(w.h));
-            const clicked = hovered and mclicked;
+            const hovered = mouse.hit(mouse_mod.rect(w.x, w.y, w.w, w.h));
+            const clicked = hovered and mouse.primary_pressed;
 
             switch (w.type) {
                 CMD_BUTTON => {
@@ -531,8 +546,8 @@ pub fn main() void {
                 },
                 CMD_SLIDER => {
                     drawSlider(&fb, w.x, w.y, w.w, w.h, w.val, label, hovered);
-                    if (mdown and hovered) {
-                        var new_val = @as(f64, @floatFromInt(mx - w.x)) / @as(f64, @floatFromInt(w.w));
+                    if (mouse.primary_down and hovered) {
+                        var new_val = @as(f64, @floatFromInt(mouse.x - w.x)) / @as(f64, @floatFromInt(w.w));
                         if (new_val < 0.0) new_val = 0.0;
                         if (new_val > 1.0) new_val = 1.0;
                         const ri = 2 + result_count * 12;

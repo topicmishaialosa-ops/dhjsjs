@@ -47,6 +47,8 @@ pub const WlConn = struct {
     h: u32,
     running: bool,
     shift: bool,
+    pointer_x: i32,
+    pointer_y: i32,
 
     pub fn open(display_num: i32) ?WlConn {
         var buf: [256]u8 = undefined;
@@ -78,6 +80,7 @@ pub const WlConn = struct {
             .shell_surface_id = 0, .shm_pool_id = 0, .buffer_id = 0,
             .callback_id = 0, .pointer_id = 0, .shm_ptr = undefined, .shm_size = 0,
             .w = 0, .h = 0, .running = true, .shift = false,
+            .pointer_x = 0, .pointer_y = 0,
         };
 
         conn.wm_base_id = 0;
@@ -312,36 +315,44 @@ pub const WlConn = struct {
             }
         }
          if (self.pointer_id != 0 and obj == self.pointer_id) {
+             if (op == 0 and plen >= 20) {
+                 self.pointer_x = @as(i32, @intCast(read32(&payload, 8) / 256));
+                 self.pointer_y = @as(i32, @intCast(read32(&payload, 12) / 256));
+                 return sys.Event{ .mouse_move = .{ .x = self.pointer_x, .y = self.pointer_y } };
+             }
+             if (op == 1) {
+                 return sys.Event{ .mouse_up = .{ .x = self.pointer_x, .y = self.pointer_y, .btn = 0 } };
+             }
              if (op == 2 and plen >= 16) {
-                 const x = @as(i32, @intCast(read32(&payload, 8) / 256));
-                 const y = @as(i32, @intCast(read32(&payload, 12) / 256));
+                 const x = @as(i32, @intCast(read32(&payload, 4) / 256));
+                 const y = @as(i32, @intCast(read32(&payload, 8) / 256));
+                 self.pointer_x = x;
+                 self.pointer_y = y;
                  return sys.Event{ .mouse_move = .{ .x = x, .y = y } };
              }
-             if (op == 3 and plen >= 24) {
+             if (op == 3 and plen >= 16) {
                  const button = read32(&payload, 8);
                  const state = read32(&payload, 12);
-                 const x = @as(i32, @intCast(read32(&payload, 16) / 256));
-                 const y = @as(i32, @intCast(read32(&payload, 20) / 256));
                  const btn: u8 = switch (button) {
                      272 => 1, 273 => 3, 274 => 2, 275 => 4, 276 => 5,
                      else => 0,
                  };
                  if (state == 1) {
-                     return sys.Event{ .mouse_down = .{ .x = x, .y = y, .btn = btn } };
+                     return sys.Event{ .mouse_down = .{ .x = self.pointer_x, .y = self.pointer_y, .btn = btn } };
                  } else {
-                     return sys.Event{ .mouse_up = .{ .x = x, .y = y, .btn = btn } };
+                     return sys.Event{ .mouse_up = .{ .x = self.pointer_x, .y = self.pointer_y, .btn = btn } };
                  }
              }
-             if (op == 4 and plen >= 12) {
-                 const axis = read32(&payload, 8);
-                 const value = read32(&payload, 12);
+             if (op == 4 and plen >= 16) {
+                 const axis = read32(&payload, 4);
+                 const value = read32(&payload, 8);
                  const val_i = @as(i32, @bitCast(value));
                  var dx: i32 = 0;
                  var dy: i32 = 0;
                  if (axis == 0) {
-                     dy = val_i >> 24;
+                     dy = -(val_i >> 8);
                  } else if (axis == 1) {
-                     dx = val_i >> 24;
+                     dx = val_i >> 8;
                  }
                  if (dx != 0 or dy != 0) {
                      return sys.Event{ .scroll = .{ .dx = dx, .dy = dy } };

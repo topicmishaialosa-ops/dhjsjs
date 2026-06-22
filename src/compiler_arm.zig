@@ -524,6 +524,522 @@ fn compileArmArgToReg(
     cb.mov(dst, cg.X0);
 }
 
+fn emitInlineResolveAarch64(cb: *cg.CodeBuffer, host_reg: u8) void {
+    const total_stack: i32 = 2048;
+    var fail_no_fd: [32]usize = .{0} ** 32;
+    var fail_no_fd_count: usize = 0;
+    var fail_close: [16]usize = .{0} ** 16;
+    var fail_close_count: usize = 0;
+    var dotted_fail: [12]usize = .{0} ** 12;
+    var dotted_fail_count: usize = 0;
+
+    cb.mov(cg.X9, host_reg);
+    cb.eor(cg.X12, cg.X12, cg.X12);
+    cb.eor(cg.X13, cg.X13, cg.X13);
+    const dotted_octet_loop = cb.len;
+    cb.eor(cg.X10, cg.X10, cg.X10);
+    cb.eor(cg.X11, cg.X11, cg.X11);
+    const dotted_digit_loop = cb.len;
+    cb.ldr8(cg.X0, cg.X9, 0);
+    cb.movRImm64(cg.X14, '0');
+    cb.cmp(cg.X0, cg.X14);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.blt();
+    cb.movRImm64(cg.X14, '9');
+    cb.cmp(cg.X0, cg.X14);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.bgt();
+    cb.movRImm64(cg.X14, 10);
+    cb.mul(cg.X10, cg.X10, cg.X14);
+    cb.movRImm64(cg.X14, '0');
+    cb.sub(cg.X0, cg.X0, cg.X14);
+    cb.add(cg.X10, cg.X10, cg.X0);
+    cb.addi(cg.X11, cg.X11, 1);
+    cb.movRImm64(cg.X0, 255);
+    cb.cmp(cg.X10, cg.X0);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.bgt();
+    cb.addi(cg.X9, cg.X9, 1);
+    const dotted_digit_jmp = cb.len;
+    cb.branch();
+    cb.patchB(dotted_digit_jmp, dotted_digit_loop);
+
+    const dotted_digits_done = cb.len;
+    var dfi: usize = 0;
+    while (dfi < dotted_fail_count) : (dfi += 1) cb.patchBCond(dotted_fail[dfi], dotted_digits_done);
+    dfi = 0;
+    cb.cmp(cg.X11, cg.ZR);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.beq();
+    cb.lsl(cg.X14, cg.X13, 3);
+    cb.lsl(cg.X10, cg.X10, cg.X14);
+    cb.orr(cg.X12, cg.X12, cg.X10);
+    cb.movRImm64(cg.X0, 3);
+    cb.cmp(cg.X13, cg.X0);
+    const dotted_last_octet = cb.len;
+    cb.beq();
+    cb.movRImm64(cg.X0, '.');
+    cb.cmp(cg.X0, cg.X0);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.bne();
+    cb.addi(cg.X9, cg.X9, 1);
+    cb.addi(cg.X13, cg.X13, 1);
+    const dotted_octet_jmp = cb.len;
+    cb.branch();
+    cb.patchB(dotted_octet_jmp, dotted_octet_loop);
+
+    const dotted_last_pos = cb.len;
+    cb.patchBCond(dotted_last_octet, dotted_last_pos);
+    cb.cmp(cg.X0, cg.ZR);
+    dotted_fail[dotted_fail_count] = cb.len; dotted_fail_count += 1;
+    cb.bne();
+    cb.mov(cg.X0, cg.X12);
+    const dotted_success_jump = cb.len;
+    cb.branch();
+
+    const dns_start = cb.len;
+    while (dfi < dotted_fail_count) : (dfi += 1) cb.patchBCond(dotted_fail[dfi], dns_start);
+
+    emitStackSub(cb, @as(u32, @intCast(total_stack)));
+    emitAddrFromSp(cb, cg.X14, 0);
+    emitAddrFromSp(cb, cg.X15, 512);
+
+    cb.movRImm64(cg.X0, 0x3412);
+    cb.str16(cg.X0, cg.X14, 0);
+    cb.movRImm64(cg.X0, 0x0100);
+    cb.str16(cg.X14, cg.X0, 2);
+    cb.movRImm64(cg.X0, 0x0001);
+    cb.str16(cg.X14, cg.X0, 4);
+    var hdr_i: i32 = 6;
+    while (hdr_i < 12) : (hdr_i += 1) cb.str8(cg.ZR, cg.X14, hdr_i);
+
+    emitAddrFromSp(cb, cg.X12, 12);
+    cb.mov(cg.X9, host_reg);
+    const label_loop = cb.len;
+    cb.mov(cg.X10, cg.X12);
+    cb.str8(cg.ZR, cg.X10, 0);
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.eor(cg.X11, cg.X11, cg.X11);
+
+    const char_loop = cb.len;
+    cb.ldr8(cg.X0, cg.X9, 0);
+    cb.cmp(cg.X0, cg.ZR);
+    const label_done_zero = cb.len;
+    cb.beq();
+    cb.movRImm64(cg.X14, '.');
+    cb.cmp(cg.X0, cg.X14);
+    const label_done_dot = cb.len;
+    cb.beq();
+    cb.str8(cg.X0, cg.X12, 0);
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.addi(cg.X9, cg.X9, 1);
+    cb.addi(cg.X11, cg.X11, 1);
+    cb.movRImm64(cg.X0, 63);
+    cb.cmp(cg.X11, cg.X0);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.bgt();
+    const char_jmp = cb.len;
+    cb.branch();
+    cb.patchB(char_jmp, char_loop);
+
+    const label_end = cb.len;
+    cb.patchBCond(label_done_zero, label_end);
+    cb.patchBCond(label_done_dot, label_end);
+    cb.str8(cg.X11, cg.X10, 0);
+    cb.cmp(cg.X11, cg.ZR);
+    const non_empty_label = cb.len;
+    cb.bne();
+    cb.cmp(cg.X0, cg.ZR);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.bne();
+    cb.patchBCond(non_empty_label, cb.len);
+    cb.movRImm64(cg.X14, '.');
+    cb.cmp(cg.X0, cg.X14);
+    const all_labels_done = cb.len;
+    cb.bne();
+    cb.addi(cg.X9, cg.X9, 1);
+    const label_loop_jmp = cb.len;
+    cb.branch();
+    cb.patchB(label_loop_jmp, label_loop);
+
+    cb.patchBCond(all_labels_done, cb.len);
+    cb.str8(cg.ZR, cg.X12, 0);
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.str8(cg.ZR, cg.X12, 0);
+    cb.str8(cg.ZR, cg.X12, 1);
+    cb.movRImm64(cg.X0, 1);
+    cb.str8(cg.X0, cg.X12, 2);
+    cb.str8(cg.ZR, cg.X12, 3);
+    cb.str8(cg.X0, cg.X12, 4);
+    cb.addi(cg.X12, cg.X12, 5);
+    cb.sub(cg.X13, cg.X12, cg.X14);
+
+    cb.movRImm64(cg.X8, 198);
+    cb.movRImm64(cg.X0, 2);
+    cb.movRImm64(cg.X1, 2);
+    cb.eor(cg.X2, cg.X2, cg.X2);
+    cb.svc(0);
+    cb.mov(cg.X19, cg.X0);
+    cb.cmp(cg.X19, cg.ZR);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.blt();
+
+    emitAddrFromSp(cb, cg.X10, 1024);
+    cb.movRImm64(cg.X0, 2);
+    cb.str16(cg.X0, cg.X10, 0);
+    cb.movRImm64(cg.X0, 0x3500);
+    cb.str16(cg.X0, cg.X10, 2);
+    cb.movRImm64(cg.X0, 0x08080808);
+    cb.str32(cg.X0, cg.X10, 4);
+    cb.str32(cg.ZR, cg.X10, 8);
+    cb.str32(cg.ZR, cg.X10, 12);
+
+    cb.movRImm64(cg.X8, 203);
+    cb.mov(cg.X0, cg.X19);
+    cb.mov(cg.X1, cg.X10);
+    cb.movRImm64(cg.X2, 16);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    fail_close[fail_close_count] = cb.len; fail_close_count += 1;
+    cb.blt();
+
+    // sendto(sock, query, len, 0, &sockaddr, 16)
+    cb.movRImm64(cg.X8, 211);
+    cb.mov(cg.X0, cg.X19);
+    cb.mov(cg.X1, cg.X14);
+    cb.mov(cg.X2, cg.X13);
+    cb.eor(cg.X3, cg.X3, cg.X3);
+    emitAddrFromSp(cb, cg.X4, 1024);
+    cb.movRImm64(cg.X5, 16);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    fail_close[fail_close_count] = cb.len; fail_close_count += 1;
+    cb.ble();
+
+    // ppoll via svc 73
+    emitAddrFromSp(cb, cg.X10, 1040);
+    cb.str32(cg.X19, cg.X10, 0);
+    cb.movRImm64(cg.X0, 1);
+    cb.str16(cg.X0, cg.X10, 4);
+    cb.str16(cg.ZR, cg.X10, 6);
+    emitAddrFromSp(cb, cg.X11, 1056);
+    cb.movRImm64(cg.X0, 5);
+    cb.str64(cg.X0, cg.X11, 0);
+    cb.str64(cg.ZR, cg.X11, 8);
+    cb.movRImm64(cg.X8, 73);
+    cb.mov(cg.X0, cg.X10);
+    cb.movRImm64(cg.X1, 1);
+    cb.mov(cg.X2, cg.X11);
+    cb.eor(cg.X3, cg.X3, cg.X3);
+    cb.eor(cg.X4, cg.X4, cg.X4);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    fail_close[fail_close_count] = cb.len; fail_close_count += 1;
+    cb.ble();
+
+    cb.movRImm64(cg.X8, 212);
+    cb.mov(cg.X0, cg.X19);
+    cb.mov(cg.X1, cg.X15);
+    cb.movRImm64(cg.X2, 512);
+    cb.eor(cg.X3, cg.X3, cg.X3);
+    cb.eor(cg.X4, cg.X4, cg.X4);
+    cb.eor(cg.X5, cg.X5, cg.X5);
+    cb.svc(0);
+    cb.mov(cg.X9, cg.X0);
+    cb.movRImm64(cg.X0, 12);
+    cb.cmp(cg.X9, cg.X0);
+    fail_close[fail_close_count] = cb.len; fail_close_count += 1;
+    cb.ble();
+
+    cb.movRImm64(cg.X8, 57);
+    cb.mov(cg.X0, cg.X19);
+    cb.svc(0);
+
+    cb.ldr16(cg.X0, cg.X15, 0);
+    cb.movRImm64(cg.X10, 0x3412);
+    cb.cmp(cg.X0, cg.X10);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.bne();
+    cb.ldr16(cg.X0, cg.X15, 6);
+    cb.lsrImm(cg.X0, cg.X0, 0);
+    cb.movRImm64(cg.X10, 0xFFFF);
+    cb.and_(cg.X10, cg.X0, cg.X10);
+    cb.cmp(cg.X10, cg.ZR);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.beq();
+
+    emitAddrFromSp(cb, cg.X12, 12);
+    const skip_q_loop2 = cb.len;
+    cb.ldr8(cg.X0, cg.X12, 0);
+    cb.cmp(cg.X0, cg.ZR);
+    const skip_q_done2 = cb.len;
+    cb.beq();
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.add(cg.X12, cg.X12, cg.X0);
+    const skip_q_jmp2 = cb.len;
+    cb.branch();
+    cb.patchB(skip_q_jmp2, skip_q_loop2);
+    cb.patchBCond(skip_q_done2, cb.len);
+    cb.addi(cg.X12, cg.X12, 5);
+
+    // Parse answer records
+    const answer_loop2 = cb.len;
+    cb.cmp(cg.X10, cg.ZR);
+    fail_no_fd[fail_no_fd_count] = cb.len; fail_no_fd_count += 1;
+    cb.beq();
+    cb.ldr8(cg.X0, cg.X12, 0);
+    cb.mov(cg.X11, cg.X0);
+    cb.movRImm64(cg.X0, 0xC0);
+    cb.and_(cg.X11, cg.X11, cg.X0);
+    cb.cmp(cg.X11, cg.X0);
+    const plain_name2 = cb.len;
+    cb.bne();
+    cb.addi(cg.X12, cg.X12, 2);
+    const name_done_jmp2 = cb.len;
+    cb.branch();
+    cb.patchBCond(plain_name2, cb.len);
+    const plain_loop2 = cb.len;
+    cb.ldr8(cg.X0, cg.X12, 0);
+    cb.cmp(cg.X0, cg.ZR);
+    const plain_done2 = cb.len;
+    cb.beq();
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.add(cg.X12, cg.X12, cg.X0);
+    const plain_jmp2 = cb.len;
+    cb.branch();
+    cb.patchB(plain_jmp2, plain_loop2);
+    cb.patchBCond(plain_done2, cb.len);
+    cb.addi(cg.X12, cg.X12, 1);
+    cb.patchB(name_done_jmp2, cb.len);
+
+    // Check for A record (type=1, class=1)
+    cb.ldr16(cg.X0, cg.X12, 0);
+    cb.cmp(cg.X0, cg.ZR);
+    const skip_answer_1 = cb.len; cb.bne();
+    cb.ldr16(cg.X0, cg.X12, 2);
+    cb.movRImm64(cg.X14, 1);
+    cb.cmp(cg.X0, cg.X14);
+    const skip_answer_2 = cb.len; cb.bne();
+    cb.ldr16(cg.X0, cg.X12, 4);
+    cb.cmp(cg.X0, cg.ZR);
+    const skip_answer_3 = cb.len; cb.bne();
+    cb.ldr16(cg.X0, cg.X12, 6);
+    cb.cmp(cg.X0, cg.X14);
+    const skip_answer_4 = cb.len; cb.bne();
+    // TTL bytes 4-7 (skip), then RDLENGTH=4
+    cb.ldr16(cg.X0, cg.X12, 8);
+    cb.cmp(cg.X0, cg.ZR);
+    const skip_answer_5 = cb.len; cb.bne();
+    cb.ldr16(cg.X0, cg.X12, 10);
+    cb.cmp(cg.X0, cg.X14);
+    const skip_answer_6 = cb.len; cb.bne();
+    // Found A record
+    cb.ldr32(cg.X0, cg.X12, 12);
+    emitStackAdd(cb, @as(u32, @intCast(total_stack)));
+    const success_jump2 = cb.len;
+    cb.branch();
+
+    const skip_answer_pos = cb.len;
+    cb.patchBCond(skip_answer_1, skip_answer_pos);
+    cb.patchBCond(skip_answer_2, skip_answer_pos);
+    cb.patchBCond(skip_answer_3, skip_answer_pos);
+    cb.patchBCond(skip_answer_4, skip_answer_pos);
+    cb.patchBCond(skip_answer_5, skip_answer_pos);
+    cb.patchBCond(skip_answer_6, skip_answer_pos);
+    cb.ldr16(cg.X0, cg.X12, 8);
+    cb.lsl(cg.X0, cg.X0, 8);
+    cb.ldr16(cg.X11, cg.X12, 10);
+    cb.orr(cg.X0, cg.X0, cg.X11);
+    cb.addi(cg.X12, cg.X12, 12);
+    cb.add(cg.X12, cg.X12, cg.X0);
+    cb.subi(cg.X10, cg.X10, 1);
+    const answer_jmp2 = cb.len;
+    cb.branch();
+    cb.patchB(answer_jmp2, answer_loop2);
+
+    const close_fail_pos2 = cb.len;
+    var fci: usize = 0;
+    while (fci < fail_close_count) : (fci += 1) cb.patchBCond(fail_close[fci], close_fail_pos2);
+    cb.movRImm64(cg.X8, 57);
+    cb.mov(cg.X0, cg.X19);
+    cb.svc(0);
+
+    const fail_pos2 = cb.len;
+    var fni: usize = 0;
+    while (fni < fail_no_fd_count) : (fni += 1) cb.patchBCond(fail_no_fd[fni], fail_pos2);
+    cb.mov(cg.X0, cg.ZR);
+    emitStackAdd(cb, @as(u32, @intCast(total_stack)));
+    cb.patchB(success_jump2, cb.len);
+    cb.patchB(dotted_success_jump, cb.len);
+}
+
+fn emitInlineHttpAarch64(cb: *cg.CodeBuffer, is_post: bool) void {
+    const request_off: u32 = 0;
+    const response_off: u32 = 4096;
+    const sockaddr_off: u32 = 12288;
+    const total_stack: u32 = 12320;
+    var error_branches: [16]usize = .{0} ** 16;
+    var error_count: usize = 0;
+
+    emitInlineResolveAarch64(cb, cg.X21);
+    cb.mov(cg.X25, cg.X0);
+    cb.cmp(cg.X25, cg.ZR);
+    const have_ip = cb.len;
+    cb.bne();
+    cb.mov(cg.X0, cg.ZR);
+    const no_ip_done = cb.len;
+    cb.branch();
+    cb.patchBCond(have_ip, cb.len);
+
+    if (is_post) {
+        cb.cmp(cg.X23, cg.ZR);
+        const body_present = cb.len;
+        cb.bne();
+        cb.mov(cg.X26, cg.ZR);
+        const body_len_done = cb.len;
+        cb.branch();
+        cb.patchBCond(body_present, cb.len);
+        emitCStringLen(cb, cg.X23, cg.X26);
+        cb.patchB(body_len_done, cb.len);
+    } else {
+        cb.mov(cg.X26, cg.ZR);
+    }
+
+    emitStackSub(cb, total_stack);
+    emitAddrFromSp(cb, cg.X19, request_off);
+    emitAddrFromSp(cb, cg.X20, response_off);
+
+    const method = if (is_post) "POST " else "GET ";
+    emitWriteLit(cb, cg.X19, method);
+    cb.cmp(cg.X22, cg.ZR);
+    const path_present = cb.len;
+    cb.bne();
+    emitWriteLit(cb, cg.X19, "/");
+    const path_done = cb.len;
+    cb.branch();
+    cb.patchBCond(path_present, cb.len);
+    emitCopyCString(cb, cg.X19, cg.X22);
+    cb.patchB(path_done, cb.len);
+
+    emitWriteLit(cb, cg.X19, " HTTP/1.0\r\nHost: ");
+    emitCopyCString(cb, cg.X19, cg.X21);
+    emitWriteLit(cb, cg.X19, "\r\nConnection: close\r\n");
+    if (is_post) {
+        emitWriteLit(cb, cg.X19, "Content-Length: ");
+        emitWriteUnsignedDecimal(cb, cg.X26, cg.X19);
+        emitWriteLit(cb, cg.X19, "\r\nContent-Type: application/x-www-form-urlencoded\r\n");
+    }
+    emitWriteLit(cb, cg.X19, "\r\n");
+    if (is_post) {
+        cb.cmp(cg.X23, cg.ZR);
+        const no_body = cb.len;
+        cb.beq();
+        emitCopyCString(cb, cg.X19, cg.X23);
+        cb.patchBCond(no_body, cb.len);
+    }
+
+    // Calculate request length
+    emitAddrFromSp(cb, cg.X26, request_off);
+    cb.mov(cg.X27, cg.X26);
+    cb.sub(cg.X28, cg.X19, cg.X26);
+
+    // socket(AF_INET=2, SOCK_STREAM=1, 0)
+    cb.movRImm64(cg.X8, 198);
+    cb.movRImm64(cg.X0, 2);
+    cb.movRImm64(cg.X1, 1);
+    cb.eor(cg.X2, cg.X2, cg.X2);
+    cb.svc(0);
+    cb.mov(cg.X24, cg.X0);
+    cb.cmp(cg.X24, cg.ZR);
+    error_branches[error_count] = cb.len; error_count += 1;
+    cb.blt();
+
+    // sockaddr_in on stack
+    emitAddrFromSp(cb, cg.X10, sockaddr_off);
+    cb.movRImm64(cg.X0, 2);
+    cb.str16(cg.X0, cg.X10, 0);
+    cb.movRImm64(cg.X0, 0x5000);
+    cb.str16(cg.X0, cg.X10, 2);
+    cb.str32(cg.X25, cg.X10, 4);
+    cb.str32(cg.ZR, cg.X10, 8);
+    cb.str32(cg.ZR, cg.X10, 12);
+
+    // connect(sock, &addr, 16)
+    cb.movRImm64(cg.X8, 203);
+    cb.mov(cg.X0, cg.X24);
+    cb.mov(cg.X1, cg.X10);
+    cb.movRImm64(cg.X2, 16);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    error_branches[error_count] = cb.len; error_count += 1;
+    cb.blt();
+
+    // write loop
+    const write_loop = cb.len;
+    cb.cmp(cg.X28, cg.ZR);
+    const write_done = cb.len;
+    cb.beq();
+    cb.movRImm64(cg.X8, 64);
+    cb.mov(cg.X0, cg.X24);
+    cb.mov(cg.X1, cg.X27);
+    cb.mov(cg.X2, cg.X28);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    error_branches[error_count] = cb.len; error_count += 1;
+    cb.ble();
+    cb.add(cg.X27, cg.X27, cg.X0);
+    cb.sub(cg.X28, cg.X28, cg.X0);
+    const write_jmp = cb.len;
+    cb.branch();
+    cb.patchB(write_jmp, write_loop);
+    cb.patchBCond(write_done, cb.len);
+
+    // read loop
+    cb.mov(cg.X26, cg.X20);
+    cb.movRImm64(cg.X27, 8191);
+    const read_loop = cb.len;
+    cb.cmp(cg.X27, cg.ZR);
+    const read_full = cb.len;
+    cb.beq();
+    cb.movRImm64(cg.X8, 63);
+    cb.mov(cg.X0, cg.X24);
+    cb.mov(cg.X1, cg.X26);
+    cb.mov(cg.X2, cg.X27);
+    cb.svc(0);
+    cb.cmp(cg.X0, cg.ZR);
+    const read_done = cb.len;
+    cb.ble();
+    cb.add(cg.X26, cg.X26, cg.X0);
+    cb.sub(cg.X27, cg.X27, cg.X0);
+    const read_jmp = cb.len;
+    cb.branch();
+    cb.patchB(read_jmp, read_loop);
+    const read_end = cb.len;
+    cb.patchBCond(read_full, read_end);
+    cb.patchBCond(read_done, read_end);
+    cb.str8(cg.ZR, cg.X26, 0);
+
+    cb.movRImm64(cg.X8, 57);
+    cb.mov(cg.X0, cg.X24);
+    cb.svc(0);
+    cb.mov(cg.X0, cg.X20);
+    emitStackAdd(cb, total_stack);
+    const success_jump = cb.len;
+    cb.branch();
+
+    // error handling
+    const close_fail = cb.len;
+    var eci: usize = 0;
+    while (eci < error_count) : (eci += 1) cb.patchBCond(error_branches[eci], close_fail);
+    cb.movRImm64(cg.X8, 57);
+    cb.mov(cg.X0, cg.X24);
+    cb.svc(0);
+    cb.mov(cg.X0, cg.ZR);
+    emitStackAdd(cb, total_stack);
+    cb.patchB(success_jump, cb.len);
+    cb.patchB(no_ip_done, cb.len);
+}
+
 fn compileBinaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, frame: i32) void {
     const op = n.name_start[0..n.name_len];
     const left = n.first_child;
@@ -790,6 +1306,53 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.svc(0);
         return;
     }
+    if (eq(name, "resolve") or eq(name, "resolve_hostname")) {
+        const rch = n.first_child;
+        if (rch != parser_mod.NO_NODE) { compileExprNode(rch, pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        emitInlineResolveAarch64(cb, cg.X0);
+        return;
+    }
+    if (eq(name, "http.get") or eq(name, "http_get") or eq(name, "httpget")) {
+        var hg_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+        var hg_ac: usize = 0;
+        var hg_ch = n.first_child;
+        while (hg_ch != parser_mod.NO_NODE and hg_ac < 2) {
+            hg_args[hg_ac] = hg_ch;
+            hg_ch = pool[@as(usize, @intCast(hg_ch))].next_sibling;
+            hg_ac += 1;
+        }
+        if (hg_args[0] != parser_mod.NO_NODE) { compileExprNode(hg_args[0], pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        cb.mov(cg.X21, cg.X0); // host
+        if (hg_args[1] != parser_mod.NO_NODE) { compileExprNode(hg_args[1], pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        cb.mov(cg.X22, cg.X0); // path
+        cb.mov(cg.X23, cg.ZR); // no body
+        emitInlineHttpAarch64(cb, false);
+        return;
+    }
+    if (eq(name, "http.post") or eq(name, "http_post") or eq(name, "httppost")) {
+        var hp_args: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
+        var hp_ac: usize = 0;
+        var hp_ch = n.first_child;
+        while (hp_ch != parser_mod.NO_NODE and hp_ac < 3) {
+            hp_args[hp_ac] = hp_ch;
+            hp_ch = pool[@as(usize, @intCast(hp_ch))].next_sibling;
+            hp_ac += 1;
+        }
+        if (hp_args[0] != parser_mod.NO_NODE) { compileExprNode(hp_args[0], pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        cb.mov(cg.X21, cg.X0); // host
+        if (hp_args[1] != parser_mod.NO_NODE) { compileExprNode(hp_args[1], pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        cb.mov(cg.X22, cg.X0); // path
+        if (hp_args[2] != parser_mod.NO_NODE) { compileExprNode(hp_args[2], pool, cb, vars, vc, frame); }
+        else { cb.mov(cg.X0, cg.ZR); }
+        cb.mov(cg.X23, cg.X0); // body
+        emitInlineHttpAarch64(cb, true);
+        return;
+    }
     if (eq(name, "android_http_get") or eq(name, "android_http_post")) {
         const is_post = eq(name, "android_http_post");
         const scratch_off: u32 = 0;
@@ -955,53 +1518,412 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         cb.patchB(success_done_jump, cb.len);
         return;
      }
-     if (eq(name, "setTheme")) {
-         // setTheme(fd, theme_id) -> sends CMD_SET_THEME to gui_srv
-         // fd: file descriptor to write to (gui_srv write end from guiServer)
-         // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light
-         var args_list: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
-         var arg_i: usize = 0;
-         var ch = n.first_child;
-         while (ch != parser_mod.NO_NODE and arg_i < 2) {
-             args_list[arg_i] = ch;
-             ch = pool[@as(usize, @intCast(ch))].next_sibling;
-             arg_i += 1;
-         }
+      if (eq(name, "setTheme")) {
+          // setTheme(fd, theme_id) -> sends CMD_SET_THEME to gui_srv
+          // fd: file descriptor to write to (gui_srv write end from guiServer)
+          // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light
+          var args_list: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var arg_i: usize = 0;
+          var ch = n.first_child;
+          while (ch != parser_mod.NO_NODE and arg_i < 2) {
+              args_list[arg_i] = ch;
+              ch = pool[@as(usize, @intCast(ch))].next_sibling;
+              arg_i += 1;
+          }
 
-         compileArmArgToReg(args_list[0], cg.X19, 0, pool, cb, vars, vc, frame);
-         compileArmArgToReg(args_list[1], cg.X20, 0, pool, cb, vars, vc, frame);
+          compileArmArgToReg(args_list[0], cg.X19, 0, pool, cb, vars, vc, frame);
+          compileArmArgToReg(args_list[1], cg.X20, 0, pool, cb, vars, vc, frame);
 
-         cb.subi(31, 31, 64);
-         cb.movRImm64(cg.X0, 13);
-         cb.str8(cg.X0, 31, 0);
-         cb.movRImm64(cg.X21, 255);
-         cb.and_(cg.X0, cg.X20, cg.X21);
-         cb.str8(cg.X0, 31, 1);
-         cb.lsrImm(cg.X0, cg.X20, 8);
-         cb.and_(cg.X0, cg.X0, cg.X21);
-         cb.str8(cg.X0, 31, 2);
-         cb.lsrImm(cg.X0, cg.X20, 16);
-         cb.and_(cg.X0, cg.X0, cg.X21);
-         cb.str8(cg.X0, 31, 3);
-         cb.lsrImm(cg.X0, cg.X20, 24);
-         cb.and_(cg.X0, cg.X0, cg.X21);
-         cb.str8(cg.X0, 31, 4);
-         {
-             var off: i32 = 5;
-             while (off < 61) : (off += 1) cb.str8(cg.ZR, 31, off);
-         }
+          cb.subi(31, 31, 64);
+          cb.movRImm64(cg.X0, 13);
+          cb.str8(cg.X0, 31, 0);
+          cb.movRImm64(cg.X21, 255);
+          cb.and_(cg.X0, cg.X20, cg.X21);
+          cb.str8(cg.X0, 31, 1);
+          cb.lsrImm(cg.X0, cg.X20, 8);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 2);
+          cb.lsrImm(cg.X0, cg.X20, 16);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 3);
+          cb.lsrImm(cg.X0, cg.X20, 24);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 4);
+          {
+              var off: i32 = 5;
+              while (off < 61) : (off += 1) cb.str8(cg.ZR, 31, off);
+          }
 
-         cb.movRImm64(cg.X8, 64);
-         cb.mov(cg.X0, cg.X19);
-         cb.addi(cg.X1, 31, 0);
-         cb.movRImm64(cg.X2, 61);
-         cb.svc(0);
-         cb.addi(31, 31, 32);
-         cb.addi(31, 31, 32);
+          cb.movRImm64(cg.X8, 64);
+          cb.mov(cg.X0, cg.X19);
+          cb.addi(cg.X1, 31, 0);
+          cb.movRImm64(cg.X2, 61);
+          cb.svc(0);
+          cb.addi(31, 31, 32);
+          cb.addi(31, 31, 32);
 
-         return;
-     }
-     cb.mov(cg.X0, cg.ZR);
+          return;
+      }
+      if (eq(name, "setStyleColor")) {
+          // setStyleColor(fd, field_index, color) -> CMD_SET_STYLE_COLOR
+          var sc_args: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
+          var sc_i: usize = 0;
+          var sc_ch = n.first_child;
+          while (sc_ch != parser_mod.NO_NODE and sc_i < 3) {
+              sc_args[sc_i] = sc_ch;
+              sc_ch = pool[@as(usize, @intCast(sc_ch))].next_sibling;
+              sc_i += 1;
+          }
+          compileArmArgToReg(sc_args[0], cg.X19, 0, pool, cb, vars, vc, frame);
+          compileArmArgToReg(sc_args[1], cg.X20, 0, pool, cb, vars, vc, frame);
+          compileArmArgToReg(sc_args[2], cg.X21, 0, pool, cb, vars, vc, frame);
+
+          cb.subi(31, 31, 64);
+          cb.movRImm64(cg.X0, 14);
+          cb.str8(cg.X0, 31, 0);
+          cb.movRImm64(cg.X22, 255);
+          cb.and_(cg.X0, cg.X20, cg.X22);
+          cb.str8(cg.X0, 31, 1);
+          cb.lsrImm(cg.X0, cg.X20, 8);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 2);
+          cb.lsrImm(cg.X0, cg.X20, 16);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 3);
+          cb.lsrImm(cg.X0, cg.X20, 24);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 4);
+          // zeros from 5 to 20
+          {
+              var off: i32 = 5;
+              while (off < 21) : (off += 1) cb.str8(cg.ZR, 31, off);
+          }
+          // write color (8 bytes) at offset 21
+          cb.and_(cg.X0, cg.X21, cg.X22);
+          cb.str8(cg.X0, 31, 21);
+          cb.lsrImm(cg.X0, cg.X21, 8);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 22);
+          cb.lsrImm(cg.X0, cg.X21, 16);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 23);
+          cb.lsrImm(cg.X0, cg.X21, 24);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 24);
+          cb.lsrImm(cg.X0, cg.X21, 32);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 25);
+          cb.lsrImm(cg.X0, cg.X21, 40);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 26);
+          cb.lsrImm(cg.X0, cg.X21, 48);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 27);
+          cb.lsrImm(cg.X0, cg.X21, 56);
+          cb.and_(cg.X0, cg.X0, cg.X22);
+          cb.str8(cg.X0, 31, 28);
+          // zeros from 29 to 60 (label = empty)
+          {
+              var off: i32 = 29;
+              while (off < 61) : (off += 1) cb.str8(cg.ZR, 31, off);
+          }
+
+          cb.movRImm64(cg.X8, 64);
+          cb.mov(cg.X0, cg.X19);
+          cb.addi(cg.X1, 31, 0);
+          cb.movRImm64(cg.X2, 61);
+          cb.svc(0);
+          cb.addi(31, 31, 32);
+          cb.addi(31, 31, 32);
+          return;
+      }
+      if (eq(name, "setStyleRounding")) {
+          var sr_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+          var sr_i: usize = 0;
+          var sr_ch = n.first_child;
+          while (sr_ch != parser_mod.NO_NODE and sr_i < 2) {
+              sr_args[sr_i] = sr_ch;
+              sr_ch = pool[@as(usize, @intCast(sr_ch))].next_sibling;
+              sr_i += 1;
+          }
+          compileArmArgToReg(sr_args[0], cg.X19, 0, pool, cb, vars, vc, frame);
+          compileArmArgToReg(sr_args[1], cg.X20, 0, pool, cb, vars, vc, frame);
+
+          cb.subi(31, 31, 64);
+          cb.movRImm64(cg.X0, 15);
+          cb.str8(cg.X0, 31, 0);
+          cb.movRImm64(cg.X21, 255);
+          cb.and_(cg.X0, cg.X20, cg.X21);
+          cb.str8(cg.X0, 31, 1);
+          cb.lsrImm(cg.X0, cg.X20, 8);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 2);
+          cb.lsrImm(cg.X0, cg.X20, 16);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 3);
+          cb.lsrImm(cg.X0, cg.X20, 24);
+          cb.and_(cg.X0, cg.X0, cg.X21);
+          cb.str8(cg.X0, 31, 4);
+          {
+              var off: i32 = 5;
+              while (off < 61) : (off += 1) cb.str8(cg.ZR, 31, off);
+          }
+
+          cb.movRImm64(cg.X8, 64);
+          cb.mov(cg.X0, cg.X19);
+          cb.addi(cg.X1, 31, 0);
+          cb.movRImm64(cg.X2, 61);
+          cb.svc(0);
+          cb.addi(31, 31, 32);
+          cb.addi(31, 31, 32);
+          return;
+      }
+      if (eq(name, "android_width")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 36);
+          return;
+      }
+      if (eq(name, "android_height")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 40);
+          return;
+      }
+      if (eq(name, "android_should_finish")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 32);
+          return;
+      }
+      if (eq(name, "android_has_focus")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 28);
+          return;
+      }
+      if (eq(name, "android_touch_x")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 56);
+          return;
+      }
+      if (eq(name, "android_touch_y")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 60);
+          return;
+      }
+      if (eq(name, "android_touch_down")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 64);
+          return;
+      }
+      if (eq(name, "android_fb_ptr")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr64(cg.X0, cg.X1, 48);
+          return;
+      }
+      if (eq(name, "android_stride")) {
+          cb.movRImm64(cg.X1, 0x200100);
+          cb.ldr32(cg.X0, cg.X1, 44);
+          return;
+      }
+      if (eq(name, "android_pixel")) {
+          var pa: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
+          var pc: usize = 0;
+          var pch = n.first_child;
+          while (pch != parser_mod.NO_NODE and pc < 3) {
+              pa[pc] = pch;
+              pch = pool[@as(usize, @intCast(pch))].next_sibling;
+              pc += 1;
+          }
+          if (pa[0] != parser_mod.NO_NODE) { compileExprNode(pa[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (pa[1] != parser_mod.NO_NODE) { compileExprNode(pa[1], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (pa[2] != parser_mod.NO_NODE) { compileExprNode(pa[2], pool, cb, vars, vc, frame); } else { cb.movRImm64(cg.X0, 0xFFFFFFFF); }
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          popX0(cb);
+          cb.mov(cg.X20, cg.X0);
+          cb.mov(cg.X21, cg.X0);
+          cb.movRImm64(cg.X22, 0x200100);
+          cb.ldr32(cg.X23, cg.X22, 44);
+          cb.ldr64(cg.X24, cg.X22, 48);
+          cb.mul(cg.X0, cg.X19, cg.X23);
+          cb.add(cg.X0, cg.X0, cg.X20);
+          cb.add(cg.X0, cg.X0, cg.X0);
+          cb.add(cg.X0, cg.X0, cg.X0);
+          cb.add(cg.X0, cg.X0, cg.X24);
+          cb.str32(cg.X21, cg.X0, 0);
+          cb.mov(cg.X0, cg.ZR);
+          return;
+      }
+      if (eq(name, "android_rect")) {
+          var ra: [5]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 5;
+          var rc: usize = 0;
+          var rch = n.first_child;
+          while (rch != parser_mod.NO_NODE and rc < 5) {
+              ra[rc] = rch;
+              rch = pool[@as(usize, @intCast(rch))].next_sibling;
+              rc += 1;
+          }
+          if (ra[0] != parser_mod.NO_NODE) { compileExprNode(ra[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ra[1] != parser_mod.NO_NODE) { compileExprNode(ra[1], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ra[2] != parser_mod.NO_NODE) { compileExprNode(ra[2], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ra[3] != parser_mod.NO_NODE) { compileExprNode(ra[3], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          if (ra[4] != parser_mod.NO_NODE) { compileExprNode(ra[4], pool, cb, vars, vc, frame); } else { cb.movRImm64(cg.X0, 0xFFFFFFFF); }
+          pushX0(cb);
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          popX0(cb);
+          cb.mov(cg.X20, cg.X0);
+          popX0(cb);
+          cb.mov(cg.X21, cg.X0);
+          popX0(cb);
+          cb.mov(cg.X22, cg.X0);
+          popX0(cb);
+          cb.mov(cg.X23, cg.X0);
+          cb.movRImm64(cg.X24, 0x200100);
+          cb.ldr32(cg.X25, cg.X24, 44);
+          cb.ldr64(cg.X26, cg.X24, 48);
+          cb.mov(cg.X27, cg.ZR);
+          const rect_y_loop = cb.len;
+          cb.cmp(cg.X27, cg.X20);
+          const rect_y_done = cb.len;
+          cb.bge();
+          cb.add(cg.X0, cg.X22, cg.X27);
+          cb.mul(cg.X0, cg.X0, cg.X25);
+          cb.add(cg.X0, cg.X0, cg.X23);
+          cb.add(cg.X0, cg.X0, cg.X0);
+          cb.add(cg.X0, cg.X0, cg.X0);
+          cb.add(cg.X0, cg.X0, cg.X26);
+          cb.mov(cg.X28, cg.X0);
+          cb.mov(cg.X0, cg.ZR);
+          const rect_x_loop = cb.len;
+          cb.cmp(cg.X0, cg.X21);
+          const rect_x_done = cb.len;
+          cb.bge();
+          cb.add(cg.X1, cg.X0, cg.X0);
+          cb.add(cg.X1, cg.X1, cg.X1);
+          cb.add(cg.X1, cg.X1, cg.X28);
+          cb.str32(cg.X19, cg.X1, 0);
+          cb.addi(cg.X0, cg.X0, 1);
+          const rect_x_jmp = cb.len;
+          cb.branch();
+          cb.patchB(rect_x_jmp, rect_x_loop);
+          const rect_x_end = cb.len;
+          cb.patchBCond(rect_x_done, rect_x_end);
+          cb.addi(cg.X27, cg.X27, 1);
+          const rect_y_jmp = cb.len;
+          cb.branch();
+          cb.patchB(rect_y_jmp, rect_y_loop);
+          const rect_y_end = cb.len;
+          cb.patchBCond(rect_y_done, rect_y_end);
+          cb.mov(cg.X0, cg.ZR);
+          return;
+      }
+      if (eq(name, "android_touch_count")) {
+          cb.movRImm64(cg.X1, 0x200100 + 168);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_touch_x_index")) {
+          var ta: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+          var tc: usize = 0;
+          var tch = n.first_child;
+          while (tch != parser_mod.NO_NODE and tc < 1) {
+              ta[tc] = tch;
+              tch = pool[@as(usize, @intCast(tch))].next_sibling;
+              tc += 1;
+          }
+          if (ta[0] != parser_mod.NO_NODE) { compileExprNode(ta[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          cb.movRImm64(cg.X1, 4);
+          cb.mul(cg.X19, cg.X19, cg.X1);
+          cb.movRImm64(cg.X1, 0x200100 + 172);
+          cb.add(cg.X1, cg.X1, cg.X19);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_touch_y_index")) {
+          var ta: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+          var tc: usize = 0;
+          var tch = n.first_child;
+          while (tch != parser_mod.NO_NODE and tc < 1) {
+              ta[tc] = tch;
+              tch = pool[@as(usize, @intCast(tch))].next_sibling;
+              tc += 1;
+          }
+          if (ta[0] != parser_mod.NO_NODE) { compileExprNode(ta[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          cb.movRImm64(cg.X1, 4);
+          cb.mul(cg.X19, cg.X19, cg.X1);
+          cb.movRImm64(cg.X1, 0x200100 + 236);
+          cb.add(cg.X1, cg.X1, cg.X19);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_touch_down_index")) {
+          var ta: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+          var tc: usize = 0;
+          var tch = n.first_child;
+          while (tch != parser_mod.NO_NODE and tc < 1) {
+              ta[tc] = tch;
+              tch = pool[@as(usize, @intCast(tch))].next_sibling;
+              tc += 1;
+          }
+          if (ta[0] != parser_mod.NO_NODE) { compileExprNode(ta[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          cb.movRImm64(cg.X1, 4);
+          cb.mul(cg.X19, cg.X19, cg.X1);
+          cb.movRImm64(cg.X1, 0x200100 + 300);
+          cb.add(cg.X1, cg.X1, cg.X19);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_touch_id_index")) {
+          var ta: [1]parser_mod.NodeIdx = .{parser_mod.NO_NODE};
+          var tc: usize = 0;
+          var tch = n.first_child;
+          while (tch != parser_mod.NO_NODE and tc < 1) {
+              ta[tc] = tch;
+              tch = pool[@as(usize, @intCast(tch))].next_sibling;
+              tc += 1;
+          }
+          if (ta[0] != parser_mod.NO_NODE) { compileExprNode(ta[0], pool, cb, vars, vc, frame); } else { cb.mov(cg.X0, cg.ZR); }
+          pushX0(cb);
+          popX0(cb);
+          cb.mov(cg.X19, cg.X0);
+          cb.movRImm64(cg.X1, 4);
+          cb.mul(cg.X19, cg.X19, cg.X1);
+          cb.movRImm64(cg.X1, 0x200100 + 364);
+          cb.add(cg.X1, cg.X1, cg.X19);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_clicked")) {
+          cb.movRImm64(cg.X1, 0x200100 + 428);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_click_x")) {
+          cb.movRImm64(cg.X1, 0x200100 + 432);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      if (eq(name, "android_click_y")) {
+          cb.movRImm64(cg.X1, 0x200100 + 436);
+          cb.ldr32(cg.X0, cg.X1, 0);
+          return;
+      }
+      cb.mov(cg.X0, cg.ZR);
+
 }
 
 fn compileFieldAccess(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, frame: i32) void {

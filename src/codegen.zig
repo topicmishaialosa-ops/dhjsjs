@@ -113,7 +113,10 @@ pub const CodeBuffer = struct {
     }
 
     pub fn movMemR32(self: *CodeBuffer, base: u8, off: i32, r: u8) void {
-        self.rex_if(r, base);
+        const rex: u8 = 0x40 |
+            (if (r >= 8) @as(u8, 4) else @as(u8, 0)) |
+            (if (base >= 8) @as(u8, 1) else @as(u8, 0));
+        if (rex != 0x40) self.byte(rex);
         self.byte(0x89);
         if (off == 0) {
             self.modrm(0, r, base);
@@ -128,6 +131,82 @@ pub const CodeBuffer = struct {
         } else if (off != 0) {
             self.dword(@as(u32, @bitCast(off)));
         }
+    }
+
+    fn memModrm(self: *CodeBuffer, reg: u8, base: u8, off: i32) void {
+        const needs_disp0 = base == RBP or base == R13;
+        if (off == 0 and !needs_disp0) {
+            self.modrm(0, reg, base);
+        } else if (off >= -128 and off <= 127) {
+            self.modrm(1, reg, base);
+        } else {
+            self.modrm(2, reg, base);
+        }
+        if (base == RSP or base == R12) self.byte(0x24);
+        if (off == 0 and needs_disp0) {
+            self.byte(0);
+        } else if (off >= -128 and off <= 127 and off != 0) {
+            self.byte(@as(u8, @bitCast(@as(i8, @intCast(off)))));
+        } else if (off != 0) {
+            self.dword(@as(u32, @bitCast(off)));
+        }
+    }
+
+    pub fn movzxRMem8(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
+        const rex: u8 = 0x40 |
+            (if (r >= 8) @as(u8, 4) else @as(u8, 0)) |
+            (if (base >= 8) @as(u8, 1) else @as(u8, 0));
+        if (rex != 0x40) self.byte(rex);
+        self.byte(0x0F);
+        self.byte(0xB6);
+        self.memModrm(r, base, off);
+    }
+
+    pub fn movMemR8(self: *CodeBuffer, base: u8, off: i32, r: u8) void {
+        const rex: u8 = 0x40 |
+            (if (r >= 8) @as(u8, 4) else @as(u8, 0)) |
+            (if (base >= 8) @as(u8, 1) else @as(u8, 0));
+        if (rex != 0x40) self.byte(rex);
+        self.byte(0x88);
+        self.memModrm(r, base, off);
+    }
+
+    pub fn movMemImm8(self: *CodeBuffer, base: u8, off: i32, val: u8) void {
+        if (base >= 8) self.byte(0x41);
+        self.byte(0xC6);
+        self.memModrm(0, base, off);
+        self.byte(val);
+    }
+
+    pub fn cmpMemImm8(self: *CodeBuffer, base: u8, off: i32, val: u8) void {
+        if (base >= 8) self.byte(0x41);
+        self.byte(0x80);
+        self.memModrm(7, base, off);
+        self.byte(val);
+    }
+
+    pub fn movMemImm16(self: *CodeBuffer, base: u8, off: i32, val: u16) void {
+        self.byte(0x66);
+        if (base >= 8) self.byte(0x41);
+        self.byte(0xC7);
+        self.memModrm(0, base, off);
+        self.word(val);
+    }
+
+    pub fn movMemImm32(self: *CodeBuffer, base: u8, off: i32, val: u32) void {
+        if (base >= 8) self.byte(0x41);
+        self.byte(0xC7);
+        self.memModrm(0, base, off);
+        self.dword(val);
+    }
+
+    pub fn movRMem32(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
+        const rex: u8 = 0x40 |
+            (if (r >= 8) @as(u8, 4) else @as(u8, 0)) |
+            (if (base >= 8) @as(u8, 1) else @as(u8, 0));
+        if (rex != 0x40) self.byte(rex);
+        self.byte(0x8B);
+        self.memModrm(r, base, off);
     }
 
     pub fn movRAReg(self: *CodeBuffer, r: u8, addr: u32) void {
@@ -376,7 +455,7 @@ pub fn pushfq(self: *CodeBuffer) void {
     }
 
     pub fn leaRMem(self: *CodeBuffer, r: u8, base: u8, off: i32) void {
-        self.rex_w(0, if (base >= 8) 1 else 0, if (r >= 8) 1 else 0);
+        self.rex_wb(if (r >= 8) 1 else 0, if (base >= 8) 1 else 0);
         if (off == 0) {
             self.byte(0x8D);
             self.modrm(0, r, base);

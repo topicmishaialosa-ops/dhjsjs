@@ -383,6 +383,696 @@ fn compileUnaryOp(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]par
     }
 }
 
+fn patchJccTo(cb: *cg.CodeBuffer, at: usize, target: usize) void {
+    patch32(cb, at + 2, @as(i32, @intCast(target)) - @as(i32, @intCast(at + 6)));
+}
+
+fn patchJmpTo(cb: *cg.CodeBuffer, at: usize, target: usize) void {
+    patch32(cb, at + 1, @as(i32, @intCast(target)) - @as(i32, @intCast(at + 5)));
+}
+
+fn emitCopyCStringX64(cb: *cg.CodeBuffer, dst: u8, src: u8) void {
+    const loop_pos = cb.pos;
+    cb.movzxRMem8(cg.RAX, src, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const done = cb.pos;
+    cb.jeRel32(0);
+    cb.movMemR8(dst, 0, cg.RAX);
+    cb.addRImm32(dst, 1);
+    cb.addRImm32(src, 1);
+    cb.jmpRel32(@as(i32, @intCast(loop_pos)) - @as(i32, @intCast(cb.pos + 5)));
+    patchJccTo(cb, done, cb.pos);
+}
+
+fn emitCStringLenX64(cb: *cg.CodeBuffer, src: u8, len_reg: u8) void {
+    cb.xorRR(len_reg, len_reg);
+    cb.movRR(cg.R11, src);
+    const loop_pos = cb.pos;
+    cb.movzxRMem8(cg.RAX, cg.R11, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const done = cb.pos;
+    cb.jeRel32(0);
+    cb.addRImm32(cg.R11, 1);
+    cb.addRImm32(len_reg, 1);
+    cb.jmpRel32(@as(i32, @intCast(loop_pos)) - @as(i32, @intCast(cb.pos + 5)));
+    patchJccTo(cb, done, cb.pos);
+}
+
+fn emitWriteLitX64(cb: *cg.CodeBuffer, dst: u8, lit: []const u8) void {
+    var i: usize = 0;
+    while (i < lit.len) : (i += 1) {
+        cb.movMemImm8(dst, 0, lit[i]);
+        cb.addRImm32(dst, 1);
+    }
+}
+
+fn emitWriteUnsignedDecimalX64(cb: *cg.CodeBuffer, value_reg: u8, dst: u8) void {
+    cb.movRR(cg.RAX, value_reg);
+    cb.cmpRImm32(cg.RAX, 0);
+    const non_zero = cb.pos;
+    cb.jneRel32(0);
+    cb.movMemImm8(dst, 0, '0');
+    cb.addRImm32(dst, 1);
+    const done_zero = cb.pos;
+    cb.jmpRel32(0);
+
+    patchJccTo(cb, non_zero, cb.pos);
+    cb.subRImm32(cg.RSP, 32);
+    cb.xorRR(cg.RCX, cg.RCX);
+    cb.movRImm64(cg.R10, 10);
+    const div_loop = cb.pos;
+    cb.xorRR(cg.RDX, cg.RDX);
+    cb.idivR(cg.R10);
+    cb.addRImm32(cg.RDX, '0');
+    cb.movRR(cg.R11, cg.RSP);
+    cb.addRR(cg.R11, cg.RCX);
+    cb.movMemR8(cg.R11, 0, cg.RDX);
+    cb.addRImm32(cg.RCX, 1);
+    cb.cmpRImm32(cg.RAX, 0);
+    const div_more = cb.pos;
+    cb.jneRel32(0);
+    patchJccTo(cb, div_more, div_loop);
+
+    const write_loop = cb.pos;
+    cb.subRImm32(cg.RCX, 1);
+    cb.movRR(cg.R11, cg.RSP);
+    cb.addRR(cg.R11, cg.RCX);
+    cb.movzxRMem8(cg.RDX, cg.R11, 0);
+    cb.movMemR8(dst, 0, cg.RDX);
+    cb.addRImm32(dst, 1);
+    cb.cmpRImm32(cg.RCX, 0);
+    const write_more = cb.pos;
+    cb.jneRel32(0);
+    patchJccTo(cb, write_more, write_loop);
+    cb.addRImm32(cg.RSP, 32);
+
+    patchJmpTo(cb, done_zero, cb.pos);
+}
+
+fn emitInlineResolveX64(cb: *cg.CodeBuffer, host_reg: u8) void {
+    const total_stack: i32 = 2048;
+    var fail_no_fd: [32]usize = .{0} ** 32;
+    var fail_no_fd_count: usize = 0;
+    var fail_close: [16]usize = .{0} ** 16;
+    var fail_close_count: usize = 0;
+    var dotted_fail: [12]usize = .{0} ** 12;
+    var dotted_fail_count: usize = 0;
+
+    cb.movRR(cg.R9, host_reg);
+    cb.movRR(cg.R13, host_reg);
+    cb.xorRR(cg.R12, cg.R12);
+    cb.xorRR(cg.RBX, cg.RBX);
+    const dotted_octet_loop = cb.pos;
+    cb.xorRR(cg.R10, cg.R10);
+    cb.xorRR(cg.R11, cg.R11);
+    const dotted_digit_loop = cb.pos;
+    cb.movzxRMem8(cg.RAX, cg.R9, 0);
+    cb.cmpRImm32(cg.RAX, '0');
+    const dotted_digits_done_low = cb.pos;
+    cb.jlRel32(0);
+    cb.cmpRImm32(cg.RAX, '9');
+    const dotted_digits_done_high = cb.pos;
+    cb.jgRel32(0);
+    cb.movRImm64(cg.RDX, 10);
+    cb.imulRR(cg.R10, cg.RDX);
+    cb.subRImm32(cg.RAX, '0');
+    cb.addRR(cg.R10, cg.RAX);
+    cb.addRImm32(cg.R11, 1);
+    cb.cmpRImm32(cg.R10, 255);
+    dotted_fail[dotted_fail_count] = cb.pos; dotted_fail_count += 1;
+    cb.jgRel32(0);
+    cb.addRImm32(cg.R9, 1);
+    cb.jmpRel32(@as(i32, @intCast(dotted_digit_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+    const dotted_digits_done = cb.pos;
+    patchJccTo(cb, dotted_digits_done_low, dotted_digits_done);
+    patchJccTo(cb, dotted_digits_done_high, dotted_digits_done);
+    cb.cmpRImm32(cg.R11, 0);
+    dotted_fail[dotted_fail_count] = cb.pos; dotted_fail_count += 1;
+    cb.jeRel32(0);
+    cb.movRR(cg.RDX, cg.RBX);
+    cb.shlRImm8(cg.RDX, 3);
+    cb.movRR(cg.RCX, cg.RDX);
+    cb.shlRcl(cg.R10);
+    cb.orRR(cg.R12, cg.R10);
+    cb.cmpRImm32(cg.RBX, 3);
+    const dotted_last_octet = cb.pos;
+    cb.jeRel32(0);
+    cb.cmpRImm32(cg.RAX, '.');
+    dotted_fail[dotted_fail_count] = cb.pos; dotted_fail_count += 1;
+    cb.jneRel32(0);
+    cb.addRImm32(cg.R9, 1);
+    cb.addRImm32(cg.RBX, 1);
+    cb.jmpRel32(@as(i32, @intCast(dotted_octet_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+    const dotted_last_pos = cb.pos;
+    patchJccTo(cb, dotted_last_octet, dotted_last_pos);
+    cb.cmpRImm32(cg.RAX, 0);
+    dotted_fail[dotted_fail_count] = cb.pos; dotted_fail_count += 1;
+    cb.jneRel32(0);
+    cb.movRR(cg.RAX, cg.R12);
+    const dotted_success_jump = cb.pos;
+    cb.jmpRel32(0);
+
+    const dns_start = cb.pos;
+    var dfi: usize = 0;
+    while (dfi < dotted_fail_count) : (dfi += 1) patchJccTo(cb, dotted_fail[dfi], dns_start);
+
+    cb.subRImm32(cg.RSP, total_stack);
+    cb.leaRMem(cg.R14, cg.RSP, 0);
+    cb.leaRMem(cg.R15, cg.RSP, 512);
+
+    cb.movMemImm8(cg.R14, 0, 0x12);
+    cb.movMemImm8(cg.R14, 1, 0x34);
+    cb.movMemImm8(cg.R14, 2, 0x01);
+    cb.movMemImm8(cg.R14, 3, 0x00);
+    cb.movMemImm8(cg.R14, 4, 0x00);
+    cb.movMemImm8(cg.R14, 5, 0x01);
+    var hdr_i: i32 = 6;
+    while (hdr_i < 12) : (hdr_i += 1) cb.movMemImm8(cg.R14, hdr_i, 0);
+
+    cb.leaRMem(cg.R12, cg.RSP, 12);
+    cb.movRR(cg.R9, cg.R13);
+    const label_loop = cb.pos;
+    cb.movRR(cg.R10, cg.R12);
+    cb.movMemImm8(cg.R10, 0, 0);
+    cb.addRImm32(cg.R12, 1);
+    cb.xorRR(cg.R11, cg.R11);
+
+    const char_loop = cb.pos;
+    cb.movzxRMem8(cg.RAX, cg.R9, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const label_done_zero = cb.pos;
+    cb.jeRel32(0);
+    cb.cmpRImm32(cg.RAX, '.');
+    const label_done_dot = cb.pos;
+    cb.jeRel32(0);
+    cb.movMemR8(cg.R12, 0, cg.RAX);
+    cb.addRImm32(cg.R12, 1);
+    cb.addRImm32(cg.R9, 1);
+    cb.addRImm32(cg.R11, 1);
+    cb.cmpRImm32(cg.R11, 63);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jgRel32(0);
+    cb.jmpRel32(@as(i32, @intCast(char_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+    const label_end = cb.pos;
+    patchJccTo(cb, label_done_zero, label_end);
+    patchJccTo(cb, label_done_dot, label_end);
+    cb.movMemR8(cg.R10, 0, cg.R11);
+    cb.cmpRImm32(cg.R11, 0);
+    const non_empty_label = cb.pos;
+    cb.jneRel32(0);
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jneRel32(0);
+    patchJccTo(cb, non_empty_label, cb.pos);
+    cb.cmpRImm32(cg.RAX, '.');
+    const all_labels_done = cb.pos;
+    cb.jneRel32(0);
+    cb.addRImm32(cg.R9, 1);
+    cb.jmpRel32(@as(i32, @intCast(label_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+    patchJccTo(cb, all_labels_done, cb.pos);
+    cb.movMemImm8(cg.R12, 0, 0);
+    cb.addRImm32(cg.R12, 1);
+    cb.movMemImm8(cg.R12, 0, 0);
+    cb.movMemImm8(cg.R12, 1, 1);
+    cb.movMemImm8(cg.R12, 2, 0);
+    cb.movMemImm8(cg.R12, 3, 1);
+    cb.addRImm32(cg.R12, 4);
+    cb.movRR(cg.RBX, cg.R12);
+    cb.subRR(cg.RBX, cg.R14);
+
+    cb.movRImm64(cg.RAX, 41);
+    cb.movRImm64(cg.RDI, 2);
+    cb.movRImm64(cg.RSI, 2);
+    cb.xorRR(cg.RDX, cg.RDX);
+    cb.syscall();
+    cb.movRR(cg.R13, cg.RAX);
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jlRel32(0);
+
+    cb.leaRMem(cg.R10, cg.RSP, 1024);
+    cb.movMemImm16(cg.R10, 0, 2);
+    cb.movMemImm16(cg.R10, 2, 0x3500);
+    cb.movMemImm32(cg.R10, 4, 0x08080808);
+    cb.movMemImm32(cg.R10, 8, 0);
+    cb.movMemImm32(cg.R10, 12, 0);
+
+    cb.movRImm64(cg.RAX, 42);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R10);
+    cb.movRImm64(cg.RDX, 16);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jlRel32(0);
+
+    cb.movRImm64(cg.RAX, 1);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R14);
+    cb.movRR(cg.RDX, cg.RBX);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jleRel32(0);
+
+    cb.leaRMem(cg.R10, cg.RSP, 1040);
+    cb.movMemR32(cg.R10, 0, cg.R13);
+    cb.movMemImm16(cg.R10, 4, 1);
+    cb.movMemImm16(cg.R10, 6, 0);
+    cb.movRImm64(cg.RAX, 7);
+    cb.movRR(cg.RDI, cg.R10);
+    cb.movRImm64(cg.RSI, 1);
+    cb.movRImm64(cg.RDX, 5000);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jleRel32(0);
+
+    cb.xorRR(cg.RAX, cg.RAX);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R15);
+    cb.movRImm64(cg.RDX, 512);
+    cb.syscall();
+    cb.movRR(cg.R9, cg.RAX);
+    cb.cmpRImm32(cg.RAX, 12);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jleRel32(0);
+
+    cb.movRImm64(cg.RAX, 3);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.syscall();
+
+    cb.movzxRMem8(cg.RAX, cg.R15, 0);
+    cb.cmpRImm32(cg.RAX, 0x12);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R15, 1);
+    cb.cmpRImm32(cg.RAX, 0x34);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jneRel32(0);
+
+    cb.movzxRMem8(cg.R10, cg.R15, 6);
+    cb.shlRImm8(cg.R10, 8);
+    cb.movzxRMem8(cg.RAX, cg.R15, 7);
+    cb.orRR(cg.R10, cg.RAX);
+    cb.cmpRImm32(cg.R10, 0);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jeRel32(0);
+
+    cb.leaRMem(cg.R12, cg.R15, 12);
+    const skip_q_loop = cb.pos;
+    cb.movzxRMem8(cg.RAX, cg.R12, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const skip_q_done = cb.pos;
+    cb.jeRel32(0);
+    cb.addRImm32(cg.R12, 1);
+    cb.addRR(cg.R12, cg.RAX);
+    cb.jmpRel32(@as(i32, @intCast(skip_q_loop)) - @as(i32, @intCast(cb.pos + 5)));
+    patchJccTo(cb, skip_q_done, cb.pos);
+    cb.addRImm32(cg.R12, 5);
+
+    const answer_loop = cb.pos;
+    cb.cmpRImm32(cg.R10, 0);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jeRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 0);
+    cb.movRR(cg.RBX, cg.RAX);
+    cb.movRImm64(cg.RAX, 0xC0);
+    cb.andRR(cg.RBX, cg.RAX);
+    cb.cmpRImm32(cg.RBX, 0xC0);
+    const plain_name = cb.pos;
+    cb.jneRel32(0);
+    cb.addRImm32(cg.R12, 2);
+    const name_done_jmp = cb.pos;
+    cb.jmpRel32(0);
+    patchJccTo(cb, plain_name, cb.pos);
+    const plain_loop = cb.pos;
+    cb.movzxRMem8(cg.RAX, cg.R12, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const plain_done = cb.pos;
+    cb.jeRel32(0);
+    cb.addRImm32(cg.R12, 1);
+    cb.addRR(cg.R12, cg.RAX);
+    cb.jmpRel32(@as(i32, @intCast(plain_loop)) - @as(i32, @intCast(cb.pos + 5)));
+    patchJccTo(cb, plain_done, cb.pos);
+    cb.addRImm32(cg.R12, 1);
+    patchJmpTo(cb, name_done_jmp, cb.pos);
+
+    cb.movzxRMem8(cg.RAX, cg.R12, 0);
+    cb.cmpRImm32(cg.RAX, 0);
+    const skip_answer_1 = cb.pos; cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 1);
+    cb.cmpRImm32(cg.RAX, 1);
+    const skip_answer_2 = cb.pos; cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 2);
+    cb.cmpRImm32(cg.RAX, 0);
+    const skip_answer_3 = cb.pos; cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 3);
+    cb.cmpRImm32(cg.RAX, 1);
+    const skip_answer_4 = cb.pos; cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 8);
+    cb.cmpRImm32(cg.RAX, 0);
+    const skip_answer_5 = cb.pos; cb.jneRel32(0);
+    cb.movzxRMem8(cg.RAX, cg.R12, 9);
+    cb.cmpRImm32(cg.RAX, 4);
+    const skip_answer_6 = cb.pos; cb.jneRel32(0);
+    cb.movRMem32(cg.RAX, cg.R12, 10);
+    cb.addRImm32(cg.RSP, total_stack);
+    const success_jump = cb.pos;
+    cb.jmpRel32(0);
+
+    const skip_answer_pos = cb.pos;
+    patchJccTo(cb, skip_answer_1, skip_answer_pos);
+    patchJccTo(cb, skip_answer_2, skip_answer_pos);
+    patchJccTo(cb, skip_answer_3, skip_answer_pos);
+    patchJccTo(cb, skip_answer_4, skip_answer_pos);
+    patchJccTo(cb, skip_answer_5, skip_answer_pos);
+    patchJccTo(cb, skip_answer_6, skip_answer_pos);
+    cb.movzxRMem8(cg.RAX, cg.R12, 8);
+    cb.shlRImm8(cg.RAX, 8);
+    cb.movzxRMem8(cg.RBX, cg.R12, 9);
+    cb.orRR(cg.RAX, cg.RBX);
+    cb.addRImm32(cg.R12, 10);
+    cb.addRR(cg.R12, cg.RAX);
+    cb.subRImm32(cg.R10, 1);
+    cb.jmpRel32(@as(i32, @intCast(answer_loop)) - @as(i32, @intCast(cb.pos + 5)));
+
+    const close_fail_pos = cb.pos;
+    var fci: usize = 0;
+    while (fci < fail_close_count) : (fci += 1) patchJccTo(cb, fail_close[fci], close_fail_pos);
+    cb.movRImm64(cg.RAX, 3);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.syscall();
+
+    const fail_pos = cb.pos;
+    var fni: usize = 0;
+    while (fni < fail_no_fd_count) : (fni += 1) patchJccTo(cb, fail_no_fd[fni], fail_pos);
+    cb.xorRR(cg.RAX, cg.RAX);
+    cb.addRImm32(cg.RSP, total_stack);
+    patchJmpTo(cb, success_jump, cb.pos);
+    patchJmpTo(cb, dotted_success_jump, cb.pos);
+}
+
+fn emitInlineHttpX64(cb: *cg.CodeBuffer, is_post: bool) void {
+    const request_off: i32 = 0;
+    const response_off: i32 = 4096;
+    const sockaddr_off: i32 = 12288;
+    const total_stack: i32 = 12320;
+    var fail_no_fd: [16]usize = .{0} ** 16;
+    var fail_no_fd_count: usize = 0;
+    var fail_close: [16]usize = .{0} ** 16;
+    var fail_close_count: usize = 0;
+
+    cb.pushR(cg.R8);
+    cb.pushR(cg.R9);
+    cb.pushR(cg.R10);
+    emitInlineResolveX64(cb, cg.R8);
+    cb.movRR(cg.R12, cg.RAX);
+    cb.popR(cg.R10);
+    cb.popR(cg.R9);
+    cb.popR(cg.R8);
+    cb.cmpRImm32(cg.R12, 0);
+    const have_ip = cb.pos;
+    cb.jneRel32(0);
+    cb.xorRR(cg.RAX, cg.RAX);
+    const no_ip_done = cb.pos;
+    cb.jmpRel32(0);
+    patchJccTo(cb, have_ip, cb.pos);
+
+    if (is_post) {
+        cb.cmpRImm32(cg.R10, 0);
+        const body_present = cb.pos;
+        cb.jneRel32(0);
+        cb.xorRR(cg.R11, cg.R11);
+        const body_len_done = cb.pos;
+        cb.jmpRel32(0);
+        patchJccTo(cb, body_present, cb.pos);
+        emitCStringLenX64(cb, cg.R10, cg.R11);
+        patchJmpTo(cb, body_len_done, cb.pos);
+    } else {
+        cb.xorRR(cg.R11, cg.R11);
+    }
+
+    cb.subRImm32(cg.RSP, total_stack);
+    cb.leaRMem(cg.R14, cg.RSP, request_off);
+    cb.leaRMem(cg.R15, cg.RSP, response_off);
+
+    if (is_post) emitWriteLitX64(cb, cg.R14, "POST ") else emitWriteLitX64(cb, cg.R14, "GET ");
+    cb.cmpRImm32(cg.R9, 0);
+    const path_present = cb.pos;
+    cb.jneRel32(0);
+    emitWriteLitX64(cb, cg.R14, "/");
+    const path_done = cb.pos;
+    cb.jmpRel32(0);
+    patchJccTo(cb, path_present, cb.pos);
+    emitCopyCStringX64(cb, cg.R14, cg.R9);
+    patchJmpTo(cb, path_done, cb.pos);
+
+    emitWriteLitX64(cb, cg.R14, " HTTP/1.0\r\nHost: ");
+    emitCopyCStringX64(cb, cg.R14, cg.R8);
+    emitWriteLitX64(cb, cg.R14, "\r\nConnection: close\r\n");
+    if (is_post) {
+        emitWriteLitX64(cb, cg.R14, "Content-Length: ");
+        emitWriteUnsignedDecimalX64(cb, cg.R11, cg.R14);
+        emitWriteLitX64(cb, cg.R14, "\r\nContent-Type: application/x-www-form-urlencoded\r\n");
+    }
+    emitWriteLitX64(cb, cg.R14, "\r\n");
+    if (is_post) {
+        cb.cmpRImm32(cg.R10, 0);
+        const no_body = cb.pos;
+        cb.jeRel32(0);
+        emitCopyCStringX64(cb, cg.R14, cg.R10);
+        patchJccTo(cb, no_body, cb.pos);
+    }
+
+    cb.movRR(cg.RBX, cg.R14);
+    cb.leaRMem(cg.R14, cg.RSP, request_off);
+    cb.subRR(cg.RBX, cg.R14);
+
+    cb.movRImm64(cg.RAX, 41);
+    cb.movRImm64(cg.RDI, 2);
+    cb.movRImm64(cg.RSI, 1);
+    cb.xorRR(cg.RDX, cg.RDX);
+    cb.syscall();
+    cb.movRR(cg.R13, cg.RAX);
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_no_fd[fail_no_fd_count] = cb.pos; fail_no_fd_count += 1;
+    cb.jlRel32(0);
+
+    cb.leaRMem(cg.R10, cg.RSP, sockaddr_off);
+    cb.movMemImm16(cg.R10, 0, 2);
+    cb.movMemImm16(cg.R10, 2, 0x5000);
+    cb.movMemR32(cg.R10, 4, cg.R12);
+    cb.movMemImm32(cg.R10, 8, 0);
+    cb.movMemImm32(cg.R10, 12, 0);
+    cb.movRImm64(cg.RAX, 42);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R10);
+    cb.movRImm64(cg.RDX, 16);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jlRel32(0);
+
+    cb.movRR(cg.R10, cg.R14);
+    cb.movRR(cg.R11, cg.RBX);
+    const write_loop = cb.pos;
+    cb.cmpRImm32(cg.R11, 0);
+    const write_done = cb.pos;
+    cb.jeRel32(0);
+    cb.movRImm64(cg.RAX, 1);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R10);
+    cb.movRR(cg.RDX, cg.R11);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    fail_close[fail_close_count] = cb.pos; fail_close_count += 1;
+    cb.jleRel32(0);
+    cb.addRR(cg.R10, cg.RAX);
+    cb.subRR(cg.R11, cg.RAX);
+    cb.jmpRel32(@as(i32, @intCast(write_loop)) - @as(i32, @intCast(cb.pos + 5)));
+    patchJccTo(cb, write_done, cb.pos);
+
+    cb.movRR(cg.R10, cg.R15);
+    cb.movRImm64(cg.R11, 8191);
+    const read_loop = cb.pos;
+    cb.cmpRImm32(cg.R11, 0);
+    const read_full = cb.pos;
+    cb.jeRel32(0);
+    cb.xorRR(cg.RAX, cg.RAX);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRR(cg.RSI, cg.R10);
+    cb.movRR(cg.RDX, cg.R11);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    const read_done = cb.pos;
+    cb.jleRel32(0);
+    cb.addRR(cg.R10, cg.RAX);
+    cb.subRR(cg.R11, cg.RAX);
+    cb.jmpRel32(@as(i32, @intCast(read_loop)) - @as(i32, @intCast(cb.pos + 5)));
+    const read_end = cb.pos;
+    patchJccTo(cb, read_full, read_end);
+    patchJccTo(cb, read_done, read_end);
+    cb.movMemImm8(cg.R10, 0, 0);
+    cb.movRImm64(cg.RAX, 3);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.syscall();
+    cb.movRR(cg.RAX, cg.R15);
+    cb.addRImm32(cg.RSP, total_stack);
+    const success_jump = cb.pos;
+    cb.jmpRel32(0);
+
+    const close_fail_pos = cb.pos;
+    var fci: usize = 0;
+    while (fci < fail_close_count) : (fci += 1) patchJccTo(cb, fail_close[fci], close_fail_pos);
+    cb.movRImm64(cg.RAX, 3);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.syscall();
+
+    const fail_pos = cb.pos;
+    var fni: usize = 0;
+    while (fni < fail_no_fd_count) : (fni += 1) patchJccTo(cb, fail_no_fd[fni], fail_pos);
+    cb.xorRR(cg.RAX, cg.RAX);
+    cb.addRImm32(cg.RSP, total_stack);
+    patchJmpTo(cb, success_jump, cb.pos);
+    patchJmpTo(cb, no_ip_done, cb.pos);
+}
+
+fn emitForkExecCurlX64(cb: *cg.CodeBuffer) void {
+    // R8=host, R9=path, R10=body (0 for GET)
+    // Build command: "curl -s https://host/path" or "curl -s -X POST -d '<body>' https://host/path"
+    cb.subRImm32(cg.RSP, 16384);
+    cb.movRR(cg.R12, cg.RSP);
+    cb.movRR(cg.R14, cg.R12);
+
+    const curl_prefix = "curl -s ";
+    for (curl_prefix) |c| { cb.movMemImm8(cg.R14, 0, c); cb.addRImm32(cg.R14, 1); }
+
+    cb.cmpRImm32(cg.R10, 0);
+    const curl_no_body = cb.pos;
+    cb.jeRel32(0);
+    const post_cmd = "-X POST -d '";
+    for (post_cmd) |c| { cb.movMemImm8(cg.R14, 0, c); cb.addRImm32(cg.R14, 1); }
+    emitCopyCStringX64(cb, cg.R14, cg.R10);
+    cb.movMemImm8(cg.R14, 0, '\''); cb.addRImm32(cg.R14, 1);
+    const curl_body_done = cb.pos;
+    cb.jmpRel32(0);
+    patchJccTo(cb, curl_no_body, cb.pos);
+
+    const https_str = "https://";
+    for (https_str) |c| { cb.movMemImm8(cg.R14, 0, c); cb.addRImm32(cg.R14, 1); }
+    emitCopyCStringX64(cb, cg.R14, cg.R8);
+    emitCopyCStringX64(cb, cg.R14, cg.R9);
+    cb.movMemImm8(cg.R14, 0, 0);
+
+    patchJmpTo(cb, curl_body_done, cb.pos);
+
+    // pipe fds: save pipe_read at bottom of buffer, pipe_write above
+    cb.movRR(cg.R15, cg.R14); // save cmd end
+    cb.subRImm32(cg.RSP, 8);
+    cb.movRR(cg.RDI, cg.RSP);
+    cb.xorRR(cg.RSI, cg.RSI);
+    cb.movRImm64(cg.RAX, 22);
+    cb.syscall();
+    cb.popR(cg.R13); // R13 = pipe_read | (pipe_write << 32)
+    cb.movRR(cg.R12, cg.R13);
+    cb.shrRImm8(cg.R12, 32); // R12 = pipe_write
+
+    cb.movRImm64(cg.RAX, 57);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    const curl_parent = cb.pos;
+    cb.jneRel32(0);
+
+    // child: close pipe_read, dup2(pipe_write, 1), exec /bin/sh -c "cmd"
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRImm64(cg.RAX, 3);
+    cb.syscall();
+    cb.movRR(cg.RDI, cg.R12);
+    cb.movRImm64(cg.RSI, 1);
+    cb.movRImm64(cg.RAX, 33);
+    cb.syscall();
+    cb.movRR(cg.RDI, cg.R12);
+    cb.movRImm64(cg.RAX, 3);
+    cb.syscall();
+
+    // argv: [sh, -c, cmd, NULL]
+    cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
+    cb.pushR(cg.R12); // cmd string (on 16KB buffer at original RSP)
+    const c_label = "-c\x00";
+    cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+    cb.dword(2); cb.byte(0xEB);
+    cb.byte(@as(u8, @intCast(c_label.len)));
+    for (c_label) |c| cb.byte(c);
+    cb.pushR(cg.RAX);
+    const sh_label = "/bin/sh\x00";
+    cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
+    cb.dword(2); cb.byte(0xEB);
+    cb.byte(@as(u8, @intCast(sh_label.len)));
+    for (sh_label) |c| cb.byte(c);
+    cb.pushR(cg.RAX);
+
+    cb.movRR(cg.RSI, cg.RSP);
+    cb.movRR(cg.RDI, cg.RAX);
+    cb.xorRR(cg.RDX, cg.RDX);
+    cb.movRImm64(cg.RAX, 59);
+    cb.syscall();
+    cb.movRImm64(cg.RDI, 1);
+    cb.movRImm64(cg.RAX, 60);
+    cb.syscall();
+
+    const curl_parent_pos = cb.pos;
+    patchJccTo(cb, curl_parent, curl_parent_pos);
+
+    // parent: close pipe_write
+    cb.movRR(cg.RDI, cg.R12);
+    cb.movRImm64(cg.RAX, 3);
+    cb.syscall();
+
+    // read response
+    cb.xorRR(cg.R15, cg.R15);
+    cb.movRR(cg.RDI, cg.R13);
+    cb.leaRMem(cg.RSI, cg.RSP, 0);
+    cb.addRR(cg.RSI, cg.R15);
+    cb.movRImm64(cg.RDX, 16300);
+    cb.xorRR(cg.RAX, cg.RAX);
+    cb.syscall();
+    cb.cmpRImm32(cg.RAX, 0);
+    const curl_read_done = cb.pos;
+    cb.jleRel32(0);
+    cb.addRR(cg.R15, cg.RAX);
+    cb.cmpRImm32(cg.R15, 16300);
+    const curl_read_full = cb.pos;
+    cb.jlRel32(0);
+
+    patchJccTo(cb, curl_read_done, cb.pos);
+    patchJccTo(cb, curl_read_full, cb.pos);
+
+    cb.leaRMem(cg.RAX, cg.RSP, 0);
+    cb.addRR(cg.RAX, cg.R15);
+    cb.byte(0xC6); cb.byte(0x00); cb.byte(0x00);
+
+    cb.movRR(cg.RDI, cg.R13);
+    cb.movRImm64(cg.RAX, 3);
+    cb.syscall();
+
+    cb.subRImm32(cg.RSP, 16);
+    cb.movRR(cg.RDI, cg.RAX);
+    cb.leaRMem(cg.RSI, cg.RSP, 0);
+    cb.xorRR(cg.RDX, cg.RDX);
+    cb.xorRR(cg.R10, cg.R10);
+    cb.movRImm64(cg.RAX, 61);
+    cb.syscall();
+    cb.addRImm32(cg.RSP, 16);
+
+    cb.movRR(cg.RAX, cg.RSP);
+    cb.addRImm32(cg.RSP, 16384);
+}
+
 fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser_mod.AstNode, cb: *cg.CodeBuffer, vars: *[MAX_VARS]Var, vc: *usize, errs: *errors_mod.ErrorList) void {
     const name = n.name_start[0..n.name_len];
     if (eq(name, "syscall")) {
@@ -1654,7 +2344,125 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          cb.addRImm32(cg.RSP, 64);
          return;
       }
-      if (eq(name, "audioplay")) {
+      if (eq(name, "setStyleColor")) {
+         // setStyleColor(fd, field_index, color) -> CMD_SET_STYLE_COLOR
+         // field_index: 0=BG, 1=PANEL_BG, 2=BTN_BG, 3=BTN_HOVER, 4=TEXT_COL,
+         //              5=ACCENT, 6=BORDER, 7=CHECK_MARK, 8=INPUT_BG, 9=SEPARATOR
+         var sc_gv: [8]i64 = .{0} ** 8;
+         var sc_is_expr: [8]bool = .{false} ** 8;
+         var sc_expr_nodes: [8]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 8;
+         var sc_expr_order: [7]usize = .{0} ** 7;
+         var sc_expr_count: usize = 0;
+         var sc_arg_idx: usize = 0;
+         var sc_ch = n.first_child;
+         while (sc_ch != parser_mod.NO_NODE and sc_arg_idx < 3) : (sc_arg_idx += 1) {
+             const sc_cn = &pool[@as(usize, @intCast(sc_ch))];
+             if (sc_cn.kind == .int_lit) { sc_gv[sc_arg_idx] = strToInt(sc_cn.val_start[0..sc_cn.val_len]); }
+             else { sc_is_expr[sc_arg_idx] = true; sc_expr_nodes[sc_arg_idx] = sc_ch; sc_expr_order[sc_expr_count] = sc_arg_idx; sc_expr_count += 1; }
+             sc_ch = sc_cn.next_sibling;
+         }
+         cb.subRImm32(cg.RSP, 64);
+         var sc_li: usize = 0;
+         while (sc_li < 4) : (sc_li += 1) {
+             cb.movRImm64(cg.RAX, 0);
+             cb.movMemR64(cg.RSP, @as(i32, @intCast(29 + sc_li * 8)), cg.RAX);
+         }
+         {
+             var sei: usize = 0;
+             while (sei < sc_expr_count) : (sei += 1) { compileExprNode(sc_expr_nodes[sc_expr_order[sei]], pool, cb, vars, vc, errs); cb.pushR(cg.RAX); }
+         }
+         cb.movImm32RSP(0, @as(u32, 14)); // CMD_SET_STYLE_COLOR
+         if (!sc_is_expr[1]) {
+             cb.movImm32RSP(1, @as(u32, @bitCast(@as(i32, @intCast(sc_gv[1])))));
+         } else {
+             cb.movImm32RSP(1, 0); // placeholder, filled by pop
+         }
+         cb.movImm32RSP(5, 0);
+         cb.movImm32RSP(9, 0);
+         cb.movImm32RSP(13, 0);
+         cb.movImm32RSP(17, 0);
+         if (!sc_is_expr[2]) {
+             const sc_val_u64 = @as(u64, @intCast(sc_gv[2]));
+             cb.movRImm64(cg.RAX, sc_val_u64);
+             cb.movMemR64(cg.RSP, 21, cg.RAX);
+         } else { cb.movRImm64(cg.RAX, 0); cb.movMemR64(cg.RSP, 21, cg.RAX); }
+         {
+             var spi: usize = sc_expr_count;
+             while (spi > 0) {
+                 spi -= 1;
+                 const sea = sc_expr_order[spi];
+                 cb.popR(cg.RAX);
+                 if (sea == 0) {}
+                 else if (sea == 1) { cb.movMemR32(cg.RSP, 1, cg.RAX); }
+                 else if (sea == 2) { cb.movMemR64(cg.RSP, 21, cg.RAX); }
+             }
+         }
+         if (sc_is_expr[0]) { compileExprNode(sc_expr_nodes[sc_expr_order[0]], pool, cb, vars, vc, errs); cb.byte(0x89); cb.byte(0xC7); }
+         else { cb.movRImm64(cg.RDI, @as(u64, @intCast(sc_gv[0]))); }
+         cb.leaRMem(cg.RSI, cg.RSP, 0);
+         cb.movRImm64(cg.RDX, 61);
+         cb.movRImm64(cg.RAX, 1);
+         cb.syscall();
+         cb.addRImm32(cg.RSP, 64);
+         return;
+       }
+       if (eq(name, "setStyleRounding")) {
+         // setStyleRounding(fd, rounding) -> CMD_SET_STYLE_ROUNDING
+         var sr_gv: [8]i64 = .{0} ** 8;
+         var sr_is_expr: [8]bool = .{false} ** 8;
+         var sr_expr_nodes: [8]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 8;
+         var sr_expr_order: [7]usize = .{0} ** 7;
+         var sr_expr_count: usize = 0;
+         var sr_arg_idx: usize = 0;
+         var sr_ch = n.first_child;
+         while (sr_ch != parser_mod.NO_NODE and sr_arg_idx < 2) : (sr_arg_idx += 1) {
+             const sr_cn = &pool[@as(usize, @intCast(sr_ch))];
+             if (sr_cn.kind == .int_lit) { sr_gv[sr_arg_idx] = strToInt(sr_cn.val_start[0..sr_cn.val_len]); }
+             else { sr_is_expr[sr_arg_idx] = true; sr_expr_nodes[sr_arg_idx] = sr_ch; sr_expr_order[sr_expr_count] = sr_arg_idx; sr_expr_count += 1; }
+             sr_ch = sr_cn.next_sibling;
+         }
+         cb.subRImm32(cg.RSP, 64);
+         var sr_li: usize = 0;
+         while (sr_li < 4) : (sr_li += 1) {
+             cb.movRImm64(cg.RAX, 0);
+             cb.movMemR64(cg.RSP, @as(i32, @intCast(29 + sr_li * 8)), cg.RAX);
+         }
+         {
+             var sei: usize = 0;
+             while (sei < sr_expr_count) : (sei += 1) { compileExprNode(sr_expr_nodes[sr_expr_order[sei]], pool, cb, vars, vc, errs); cb.pushR(cg.RAX); }
+         }
+         cb.movImm32RSP(0, @as(u32, 15)); // CMD_SET_STYLE_ROUNDING
+         if (!sr_is_expr[1]) {
+             cb.movImm32RSP(1, @as(u32, @bitCast(@as(i32, @intCast(sr_gv[1])))));
+         } else {
+             cb.movImm32RSP(1, 0);
+         }
+         cb.movImm32RSP(5, 0);
+         cb.movImm32RSP(9, 0);
+         cb.movImm32RSP(13, 0);
+         cb.movImm32RSP(17, 0);
+         cb.movRImm64(cg.RAX, 0);
+         cb.movMemR64(cg.RSP, 21, cg.RAX);
+         {
+             var spi: usize = sr_expr_count;
+             while (spi > 0) {
+                 spi -= 1;
+                 const sea = sr_expr_order[spi];
+                 cb.popR(cg.RAX);
+                 if (sea == 0) {}
+                 else if (sea == 1) { cb.movMemR32(cg.RSP, 1, cg.RAX); }
+             }
+         }
+         if (sr_is_expr[0]) { compileExprNode(sr_expr_nodes[sr_expr_order[0]], pool, cb, vars, vc, errs); cb.byte(0x89); cb.byte(0xC7); }
+         else { cb.movRImm64(cg.RDI, @as(u64, @intCast(sr_gv[0]))); }
+         cb.leaRMem(cg.RSI, cg.RSP, 0);
+         cb.movRImm64(cg.RDX, 61);
+         cb.movRImm64(cg.RAX, 1);
+         cb.syscall();
+         cb.addRImm32(cg.RSP, 64);
+         return;
+       }
+       if (eq(name, "audioplay")) {
         const ch = n.first_child;
         if (ch != parser_mod.NO_NODE) { compileExprNode(ch, pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
@@ -2173,8 +2981,8 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         return;
      }
      if (eq(name, "android_touch_count")) {
-         cb.movRImm64(cg.RDI, 0x200100 + 164);
-         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         cb.movRImm64(cg.RDI, 0x200100 + 168);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
          return;
      }
      if (eq(name, "android_touch_x_index")) {
@@ -2190,12 +2998,11 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          if (aargs[0] != parser_mod.NO_NODE) { compileExprNode(aargs[0], pool, cb, vars, vc, errs); } else { cb.xorRR(cg.RAX, cg.RAX); }
          cb.pushR(cg.RAX); // index
          cb.popR(cg.R8);   // R8 = index
-         // compute offset = 168 + index*4
          cb.movRImm64(cg.R9, 4);
          cb.imulRR(cg.R9, cg.R8); // R9 = index*4
-         cb.movRImm64(cg.RDI, 0x200100 + 168);
+         cb.movRImm64(cg.RDI, 0x200100 + 172);
          cb.addRR(cg.RDI, cg.R9); // RDI = address
-         cb.movRMem64(cg.RAX, cg.RDI, 0); // load f32 bits
+         cb.movRMem32(cg.RAX, cg.RDI, 0); // load f32 bits
          return;
      }
      if (eq(name, "android_touch_y_index")) {
@@ -2212,9 +3019,9 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          cb.popR(cg.R8);
          cb.movRImm64(cg.R9, 4);
          cb.imulRR(cg.R9, cg.R8);
-         cb.movRImm64(cg.RDI, 0x200100 + 232);
+         cb.movRImm64(cg.RDI, 0x200100 + 236);
          cb.addRR(cg.RDI, cg.R9);
-         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
          return;
      }
      if (eq(name, "android_touch_down_index")) {
@@ -2231,9 +3038,9 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          cb.popR(cg.R8);
          cb.movRImm64(cg.R9, 4);
          cb.imulRR(cg.R9, cg.R8);
-         cb.movRImm64(cg.RDI, 0x200100 + 296);
+         cb.movRImm64(cg.RDI, 0x200100 + 300);
          cb.addRR(cg.RDI, cg.R9);
-         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
          return;
      }
      if (eq(name, "android_touch_id_index")) {
@@ -2250,129 +3057,79 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
          cb.popR(cg.R8);
          cb.movRImm64(cg.R9, 4);
          cb.imulRR(cg.R9, cg.R8);
-         cb.movRImm64(cg.RDI, 0x200100 + 360);
+         cb.movRImm64(cg.RDI, 0x200100 + 364);
          cb.addRR(cg.RDI, cg.R9);
-         cb.movRMem64(cg.RAX, cg.RDI, 0);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_clicked")) {
+         cb.movRImm64(cg.RDI, 0x200100 + 428);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_click_x")) {
+         cb.movRImm64(cg.RDI, 0x200100 + 432);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
+         return;
+     }
+     if (eq(name, "android_click_y")) {
+         cb.movRImm64(cg.RDI, 0x200100 + 436);
+         cb.movRMem32(cg.RAX, cg.RDI, 0);
          return;
      }
      if (eq(name, "resolve") or eq(name, "resolve_hostname")) {
-        // resolve(hostname_ptr) → u32 ip (fork+exec http_client resolve hostname)
         const rch = n.first_child;
         if (rch != parser_mod.NO_NODE) { compileExprNode(rch, pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
-        cb.pushR(cg.RAX); // hostname ptr
-
-        // Create pipe to read result
-        cb.subRImm32(cg.RSP, 8);
-        cb.movRR(cg.RDI, cg.RSP);
-        cb.xorRR(cg.RSI, cg.RSI);
-        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
-        cb.syscall();
-        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
-        cb.movRR(cg.R13, cg.R12);
-        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
-
-        // fork
-        cb.movRImm64(cg.RAX, 57);
-        cb.syscall();
-        cb.cmpRImm32(cg.RAX, 0);
-        const res_parent = cb.pos;
-        cb.jneRel32(0);
-
-        // child
-        cb.movRR(cg.RDI, cg.R12); // close pipe_read
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13); // dup2(pipe_write, 1)
-        cb.movRImm64(cg.RSI, 1);
-        cb.movRImm64(cg.RAX, 33);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13); // close pipe_write
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        cb.popR(cg.R8); // hostname ptr
-
-        // argv[2] = host, argv[1] = "resolve", argv[0] = "http_client"
-        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX); // argv[3] = NULL
-        cb.pushR(cg.R8);  // argv[2] = hostname
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const res_str = "resolve\x00";
-        cb.byte(@as(u8, @intCast(res_str.len)));
-        for (res_str) |c| cb.byte(c);
-        cb.pushR(cg.RAX); // argv[1] = "resolve"
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const res_argv0 = "http_client\x00";
-        cb.byte(@as(u8, @intCast(res_argv0.len)));
-        for (res_argv0) |c| cb.byte(c);
+        emitInlineResolveX64(cb, cg.RAX);
+        return;
+    }
+    if (eq(name, "https.get") or eq(name, "https_get") or eq(name, "httpsget")) {
+        var hg_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
+        var hg_ac: usize = 0;
+        var hg_ch = n.first_child;
+        while (hg_ch != parser_mod.NO_NODE and hg_ac < 2) {
+            hg_args[hg_ac] = hg_ch;
+            hg_ch = pool[@as(usize, @intCast(hg_ch))].next_sibling;
+            hg_ac += 1;
+        }
+        if (hg_args[0] != parser_mod.NO_NODE) { compileExprNode(hg_args[0], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
         cb.pushR(cg.RAX);
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const res_exe = "./http_client\x00";
-        cb.byte(@as(u8, @intCast(res_exe.len)));
-        for (res_exe) |c| cb.byte(c);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.movRR(cg.RSI, cg.RSP);
-        cb.xorRR(cg.RDX, cg.RDX);
-        cb.movRImm64(cg.RAX, 59);
-        cb.syscall();
-        cb.movRImm64(cg.RDI, 1);
-        cb.movRImm64(cg.RAX, 60);
-        cb.syscall();
-
-        const res_parent_pos = cb.pos;
-        patch32(cb, res_parent + 2, @as(i32, @intCast(res_parent_pos)) - @as(i32, @intCast(res_parent + 6)));
-
-        // parent: close pipe_write, read 4 bytes from pipe_read
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        // Read result
-        cb.subRImm32(cg.RSP, 16);
-        cb.movRR(cg.RDI, cg.R12);
-        cb.leaRMem(cg.RSI, cg.RSP, 0);
-        cb.movRImm64(cg.RDX, 4);
-        cb.xorRR(cg.RAX, cg.RAX);
-        cb.syscall();
-
-        // Close pipe_read
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        // Wait for child
-        cb.subRImm32(cg.RSP, 16);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.leaRMem(cg.RSI, cg.RSP, 0);
-        cb.xorRR(cg.RDX, cg.RDX);
+        if (hg_args[1] != parser_mod.NO_NODE) { compileExprNode(hg_args[1], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        cb.popR(cg.R9);
+        cb.popR(cg.R8);
         cb.xorRR(cg.R10, cg.R10);
-        cb.movRImm64(cg.RAX, 61);
-        cb.syscall();
-        cb.addRImm32(cg.RSP, 16);
-
-        // Read IP from stack buffer
-        cb.xorRR(cg.RAX, cg.RAX);
-        cb.byte(0x8A); cb.byte(0x04); cb.byte(0x24); // mov al, [rsp]
-        cb.movRR(cg.R8, cg.RAX);
-        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x01); // mov al, [rsp+1]
-        cb.shlRImm8(cg.RAX, 8);
-        cb.orRR(cg.R8, cg.RAX);
-        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x02); // mov al, [rsp+2]
-        cb.shlRImm8(cg.RAX, 16);
-        cb.orRR(cg.R8, cg.RAX);
-        cb.byte(0x8A); cb.byte(0x44); cb.byte(0x24); cb.byte(0x03); // mov al, [rsp+3]
-        cb.shlRImm8(cg.RAX, 24);
-        cb.orRR(cg.R8, cg.RAX);
-
-        cb.addRImm32(cg.RSP, 16 + 8); // pop buffer + hostname ptr
-        cb.movRR(cg.RAX, cg.R8);
+        emitForkExecCurlX64(cb);
+        return;
+    }
+    if (eq(name, "https.post") or eq(name, "https_post") or eq(name, "httpspost")) {
+        var hp_args: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
+        var hp_ac: usize = 0;
+        var hp_ch = n.first_child;
+        while (hp_ch != parser_mod.NO_NODE and hp_ac < 3) {
+            hp_args[hp_ac] = hp_ch;
+            hp_ch = pool[@as(usize, @intCast(hp_ch))].next_sibling;
+            hp_ac += 1;
+        }
+        if (hp_args[0] != parser_mod.NO_NODE) { compileExprNode(hp_args[0], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (hp_args[1] != parser_mod.NO_NODE) { compileExprNode(hp_args[1], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        if (hp_args[2] != parser_mod.NO_NODE) { compileExprNode(hp_args[2], pool, cb, vars, vc, errs); }
+        else { cb.xorRR(cg.RAX, cg.RAX); }
+        cb.pushR(cg.RAX);
+        cb.popR(cg.R10);
+        cb.popR(cg.R9);
+        cb.popR(cg.R8);
+        emitForkExecCurlX64(cb);
         return;
     }
     if (eq(name, "http.get") or eq(name, "http_get") or eq(name, "httpget")) {
-        // http.get(host_ptr, path_ptr) → returns response string pointer
         var hg_args: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
         var hg_ac: usize = 0;
         var hg_ch = n.first_child;
@@ -2387,129 +3144,13 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         if (hg_args[1] != parser_mod.NO_NODE) { compileExprNode(hg_args[1], pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
         cb.pushR(cg.RAX); // path
-
-        // pipe + buffer setup (save args in regs first)
-        cb.subRImm32(cg.RSP, 8);
-        cb.movRR(cg.RDI, cg.RSP);
-        cb.xorRR(cg.RSI, cg.RSI);
-        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
-        cb.syscall();
-        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
-        cb.movRR(cg.R13, cg.R12);
-        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
-
-        // save args in regs (path on top, host below)
         cb.popR(cg.R9);  // R9 = path
         cb.popR(cg.R8);  // R8 = host
-
-        // allocate response buffer
-        cb.subRImm32(cg.RSP, 8192);
-        cb.movRR(cg.R14, cg.RSP); // R14 = buffer
-
-        // fork
-        cb.movRImm64(cg.RAX, 57);
-        cb.syscall();
-        cb.cmpRImm32(cg.RAX, 0);
-        const hg_parent = cb.pos;
-        cb.jneRel32(0);
-
-        // child: close pipe_read, dup2(pipe_write, 1)
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RSI, 1);
-        cb.movRImm64(cg.RAX, 33);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        // args already in R8(host), R9(path)
-        // argv[4] = NULL, argv[3] = path, argv[2] = host
-        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
-        cb.pushR(cg.R9);
-        cb.pushR(cg.R8);
-        // argv[1] = "GET"
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hg_get = "GET\x00";
-        cb.byte(@as(u8, @intCast(hg_get.len)));
-        for (hg_get) |c| cb.byte(c);
-        cb.pushR(cg.RAX);
-        // argv[0] = "http_client"
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hg_argv0 = "http_client\x00";
-        cb.byte(@as(u8, @intCast(hg_argv0.len)));
-        for (hg_argv0) |c| cb.byte(c);
-        cb.pushR(cg.RAX);
-        // exe = "./http_client"
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hg_exe = "./http_client\x00";
-        cb.byte(@as(u8, @intCast(hg_exe.len)));
-        for (hg_exe) |c| cb.byte(c);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.movRR(cg.RSI, cg.RSP);
-        cb.xorRR(cg.RDX, cg.RDX);
-        cb.movRImm64(cg.RAX, 59);
-        cb.syscall();
-        cb.movRImm64(cg.RDI, 1);
-        cb.movRImm64(cg.RAX, 60);
-        cb.syscall();
-
-        const hg_parent_pos = cb.pos;
-        patch32(cb, hg_parent + 2, @as(i32, @intCast(hg_parent_pos)) - @as(i32, @intCast(hg_parent + 6)));
-
-        // parent: close pipe_write, read response
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        cb.xorRR(cg.R15, cg.R15);
-        const hg_read_loop = cb.pos;
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRR(cg.RSI, cg.R14);
-        cb.addRR(cg.RSI, cg.R15);
-        cb.movRImm64(cg.RDX, 4096);
-        cb.xorRR(cg.RAX, cg.RAX);
-        cb.syscall();
-        cb.cmpRImm32(cg.RAX, 0);
-        const hg_read_done = cb.pos;
-        cb.jleRel32(0);
-        cb.addRR(cg.R15, cg.RAX);
-        cb.cmpRImm32(cg.R15, 8192);
-        const hg_read_full = cb.pos;
-        cb.jlRel32(0);
-
-        const hg_read_done_lbl = cb.pos;
-        patch32(cb, hg_read_done + 2, @as(i32, @intCast(hg_read_done_lbl)) - @as(i32, @intCast(hg_read_done + 6)));
-        patch32(cb, hg_read_full + 2, @as(i32, @intCast(hg_read_loop)) - @as(i32, @intCast(hg_read_full + 6)));
-
-        cb.movRR(cg.RAX, cg.R14);
-        cb.addRR(cg.RAX, cg.R15);
-        cb.byte(0xC6); cb.byte(0x00); cb.byte(0x00);
-
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        cb.subRImm32(cg.RSP, 16);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.leaRMem(cg.RSI, cg.RSP, 0);
-        cb.xorRR(cg.RDX, cg.RDX);
         cb.xorRR(cg.R10, cg.R10);
-        cb.movRImm64(cg.RAX, 61);
-        cb.syscall();
-        cb.addRImm32(cg.RSP, 16);
-
-        cb.movRR(cg.RAX, cg.R14);
-        cb.addRImm32(cg.RSP, 8192 + 8 + 16);
+        emitInlineHttpX64(cb, false);
         return;
     }
     if (eq(name, "http.post") or eq(name, "http_post") or eq(name, "httppost") or eq(name, "http.post")) {
-        // http.post(host_ptr, path_ptr, body_ptr) → returns response string pointer
         var hp_args: [3]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 3;
         var hp_ac: usize = 0;
         var hp_ch = n.first_child;
@@ -2527,124 +3168,10 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
         if (hp_args[2] != parser_mod.NO_NODE) { compileExprNode(hp_args[2], pool, cb, vars, vc, errs); }
         else { cb.xorRR(cg.RAX, cg.RAX); }
         cb.pushR(cg.RAX); // body (top)
-
-        // Allocate pipe and stack buffer
-        cb.subRImm32(cg.RSP, 8);
-        cb.movRR(cg.RDI, cg.RSP);
-        cb.xorRR(cg.RSI, cg.RSI);
-        cb.movRImm64(cg.RAX, 22); // SYS_PIPE
-        cb.syscall();
-        cb.popR(cg.R12); // R12 = pipe_read | (pipe_write << 32)
-        cb.movRR(cg.R13, cg.R12);
-        cb.shrRImm8(cg.R13, 32); // R13 = pipe_write
-
-        // save args in regs (body on top, path below, host deepest)
         cb.popR(cg.R10); // R10 = body
         cb.popR(cg.R9);  // R9 = path
         cb.popR(cg.R8);  // R8 = host
-
-        cb.subRImm32(cg.RSP, 8192); // response buffer
-        cb.movRR(cg.R14, cg.RSP);
-
-        // fork
-        cb.movRImm64(cg.RAX, 57);
-        cb.syscall();
-        cb.cmpRImm32(cg.RAX, 0);
-        const hp_parent = cb.pos;
-        cb.jneRel32(0);
-
-        // child: setup pipes, exec http_client POST
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RSI, 1);
-        cb.movRImm64(cg.RAX, 33);
-        cb.syscall();
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        // args already in R8(host), R9(path), R10(body)
-
-        cb.movRImm64(cg.RAX, 0); cb.pushR(cg.RAX);
-        cb.pushR(cg.R10);
-        cb.pushR(cg.R9);
-        cb.pushR(cg.R8);
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hp_post = "POST\x00";
-        cb.byte(@as(u8, @intCast(hp_post.len)));
-        for (hp_post) |c| cb.byte(c);
-        cb.pushR(cg.RAX);
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hp_argv0 = "http_client\x00";
-        cb.byte(@as(u8, @intCast(hp_argv0.len)));
-        for (hp_argv0) |c| cb.byte(c);
-        cb.movRR(cg.R9, cg.RAX);
-        cb.pushR(cg.R9); // argv[0] = "http_client"
-        cb.byte(0x48); cb.byte(0x8D); cb.byte(0x05);
-        cb.dword(2); cb.byte(0xEB);
-        const hp_exe = "./http_client\x00";
-        cb.byte(@as(u8, @intCast(hp_exe.len)));
-        for (hp_exe) |c| cb.byte(c);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.movRR(cg.RSI, cg.RSP);
-        cb.xorRR(cg.RDX, cg.RDX);
-        cb.movRImm64(cg.RAX, 59);
-        cb.syscall();
-        cb.movRImm64(cg.RDI, 1);
-        cb.movRImm64(cg.RAX, 60);
-        cb.syscall();
-
-        const hp_parent_pos = cb.pos;
-        patch32(cb, hp_parent + 2, @as(i32, @intCast(hp_parent_pos)) - @as(i32, @intCast(hp_parent + 6)));
-
-        // parent: close pipe_write, read
-        cb.movRR(cg.RDI, cg.R13);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        cb.xorRR(cg.R15, cg.R15);
-        const hp_read_loop = cb.pos;
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRR(cg.RSI, cg.R14);
-        cb.addRR(cg.RSI, cg.R15);
-        cb.movRImm64(cg.RDX, 4096);
-        cb.xorRR(cg.RAX, cg.RAX);
-        cb.syscall();
-        cb.cmpRImm32(cg.RAX, 0);
-        const hp_read_done = cb.pos;
-        cb.jleRel32(0);
-        cb.addRR(cg.R15, cg.RAX);
-        cb.cmpRImm32(cg.R15, 8192);
-        const hp_read_full = cb.pos;
-        cb.jlRel32(0);
-
-        const hp_read_done_lbl = cb.pos;
-        patch32(cb, hp_read_done + 2, @as(i32, @intCast(hp_read_done_lbl)) - @as(i32, @intCast(hp_read_done + 6)));
-        patch32(cb, hp_read_full + 2, @as(i32, @intCast(hp_read_loop)) - @as(i32, @intCast(hp_read_full + 6)));
-
-        cb.movRR(cg.RAX, cg.R14);
-        cb.addRR(cg.RAX, cg.R15);
-        cb.byte(0xC6); cb.byte(0x00); cb.byte(0x00);
-
-        cb.movRR(cg.RDI, cg.R12);
-        cb.movRImm64(cg.RAX, 3);
-        cb.syscall();
-
-        cb.subRImm32(cg.RSP, 16);
-        cb.movRR(cg.RDI, cg.RAX);
-        cb.leaRMem(cg.RSI, cg.RSP, 0);
-        cb.xorRR(cg.RDX, cg.RDX);
-        cb.xorRR(cg.R10, cg.R10);
-        cb.movRImm64(cg.RAX, 61);
-        cb.syscall();
-        cb.addRImm32(cg.RSP, 16);
-
-        cb.movRR(cg.RAX, cg.R14);
-        cb.addRImm32(cg.RSP, 8192 + 4 + 24); // buffer + pipe_fds + 3 args
+        emitInlineHttpX64(cb, true);
         return;
     }
     cb.movRImm64(cg.RAX, 0);

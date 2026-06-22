@@ -2,6 +2,7 @@ const sys = @import("sys.zig");
 const gfx = @import("render.zig");
 const display_mod = @import("display.zig");
 const gui_mod = @import("gui.zig");
+const mouse_mod = @import("mouse.zig");
 
 const StyleInfo = struct { name: []const u8, style: gui_mod.Style };
 
@@ -61,20 +62,13 @@ pub fn main() void {
 
     const styles = allStyles();
     var style_idx: usize = 0;
-    var mouse_x: i32 = 0;
-    var mouse_y: i32 = 0;
-    var mouse_down = false;
-    var mouse_clicked = false;
-    var mouse_released = false;
-    var scroll_delta: i32 = 0;
+    var mouse = mouse_mod.State.init();
 
     var key_state: [gui_mod.MAX_KEY]bool = [_]bool{false} ** gui_mod.MAX_KEY;
 
     var running = true;
     while (running) {
-        mouse_clicked = false;
-        mouse_released = false;
-        scroll_delta = 0;
+        mouse.beginFrame();
 
         while (disp.pollEvent()) |event| {
             switch (event) {
@@ -85,36 +79,21 @@ pub fn main() void {
                 .key_release => |kc| {
                     if (kc < gui_mod.MAX_KEY) key_state[kc] = false;
                 },
-                .mouse_move => |m| { mouse_x = m.x; mouse_y = m.y; },
-                .mouse_down => |m| {
-                    mouse_x = m.x; mouse_y = m.y;
-                    mouse_down = true;
-                    mouse_clicked = true;
-                },
-                .mouse_up => |m| {
-                    mouse_x = m.x; mouse_y = m.y;
-                    mouse_down = false;
-                    mouse_released = true;
-                },
+                .mouse_move, .mouse_down, .mouse_up, .scroll => mouse.applyEvent(event),
                 .close => running = false,
                 .expose => {},
                 .resize => |r| { _ = r; },
-                .scroll => |s| { scroll_delta += s.dy; },
             }
         }
+        mouse.endFrame();
 
-        const input = gui_mod.InputState{
-            .mouse_x = mouse_x,
-            .mouse_y = mouse_y,
-            .mouse_down = mouse_down,
-            .mouse_clicked = mouse_clicked,
-            .mouse_released = mouse_released,
-            .scroll = scroll_delta,
-            .keys = key_state,
-            .keys_pressed = [_]bool{false} ** gui_mod.MAX_KEY,
-            .text_input = [_]u8{0} ** 16,
-            .text_len = 0,
-        };
+        const input = gui_mod.InputState.fromMouse(
+            mouse,
+            key_state,
+            [_]bool{false} ** gui_mod.MAX_KEY,
+            [_]u8{0} ** 16,
+            0,
+        );
 
         gui.beginFrame(&fb, input);
         _ = gui.beginWindow("Widgets Demo", 10, 10, 350, 540, true);
@@ -148,8 +127,8 @@ pub fn main() void {
         {
             var buf: [64]u8 = undefined;
             var len: usize = 0;
-            const mx: i32 = mouse_x;
-            const my: i32 = mouse_y;
+            const mx: i32 = mouse.x;
+            const my: i32 = mouse.y;
             const ms = "Mouse: ";
             for (ms) |c| { if (len < 60) { buf[len] = c; len += 1; } }
             var mxt = mx;

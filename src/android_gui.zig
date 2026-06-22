@@ -69,6 +69,7 @@ var window_ptr: ?*anyopaque = null;
 var input_queue_ptr: ?*anyopaque = null;
 var has_focus: bool = false;
 var should_finish: bool = false;
+var prev_touch_down: u32 = 0;
 var ctx: GuiContext = undefined;
 
 export fn ANativeActivity_onCreate(activity: *anyopaque, _: ?*anyopaque, _: usize) void {
@@ -199,10 +200,18 @@ fn renderFrame(window: *anyopaque) void {
          cmd_ptr.touch_down_arr[i] = if (ctx.touch_events[i].action == 0) 1 else 0;
          cmd_ptr.touch_id_arr[i] = ctx.touch_events[i].pointer_id;
      }
-    ctx.touch_count = 0;
-    ctx.key_count = 0;
+     // Rising-edge click detection
+     cmd_ptr.clicked = 0;
+     if (cmd_ptr.touch_down == 1 and prev_touch_down == 0) {
+         cmd_ptr.clicked = 1;
+         cmd_ptr.click_x = if (ctx.touch_count > 0) ctx.touch_events[0].x else 0;
+         cmd_ptr.click_y = if (ctx.touch_count > 0) ctx.touch_events[0].y else 0;
+     }
+     prev_touch_down = cmd_ptr.touch_down;
+     ctx.touch_count = 0;
+     ctx.key_count = 0;
 
-    // Call user code (dhjsjs compiled)
+     // Call user code (dhjsjs compiled)
     main();
 
     _ = system.ANativeWindow_unlockAndPost(window);
