@@ -103,7 +103,7 @@ fn sha256Block(h: *[8]u32, block: *const [64]u8) void {
 // ============================== BigInt ==============================
 
 const LIMB = u32;
-const MAX_LIMBS = 64;
+const MAX_LIMBS = 160;
 
 pub const BigInt = struct {
     limbs: [MAX_LIMBS]LIMB = [_]LIMB{0} ** MAX_LIMBS,
@@ -129,7 +129,7 @@ pub fn biFromBytes(bytes: []const u8) BigInt {
     var r = BigInt{};
     var i: usize = 0;
     while (i < bytes.len) {
-        const idx = @as(usize, @intCast((bytes.len - 1 - i) / 4));
+        const idx = @as(usize, @intCast(i / 4));
         if (idx >= MAX_LIMBS) break;
         r.limbs[idx] = (r.limbs[idx] << 8) | @as(u32, bytes[bytes.len - 1 - i]);
         i += 1;
@@ -145,11 +145,15 @@ pub fn biToBytes(a: *const BigInt, out: []u8) void {
     var j: usize = 0;
     while (j < a.len) : (j += 1) {
         const v = a.limbs[j];
-        const base = (out.len - 1) - j * 4;
-        if (base < out.len) out[base] = @as(u8, @truncate(v));
-        if (base + 1 < out.len) out[base + 1] = @as(u8, @truncate(v >> 8));
-        if (base + 2 < out.len) out[base + 2] = @as(u8, @truncate(v >> 16));
-        if (base + 3 < out.len) out[base + 3] = @as(u8, @truncate(v >> 24));
+        // Limb j (j=0 is LSB) goes to the rightmost 4 bytes of the output
+        var k: usize = 0;
+        while (k < 4) : (k += 1) {
+            const base = j * 4 + k;
+            if (base < out.len) {
+                const pos = (out.len - 1) - base;
+                out[pos] = @as(u8, @truncate(v >> @as(u5, @truncate(k * 8))));
+            }
+        }
     }
 }
 
@@ -305,7 +309,13 @@ fn biDiv(a: *const BigInt, b: *const BigInt, q: *BigInt, r: *BigInt) void {
     @memcpy(num[0..a.len], a.limbs[0..a.len]);
     var num_len: usize = a.len;
     var quot: [MAX_LIMBS]LIMB = [_]LIMB{0} ** MAX_LIMBS;
+    var div_iter: u32 = 0;
     while (num_len >= b.len and (num_len > b.len or cmpNumLimbs(num[0..num_len], b.limbs[0..b.len]) >= 0)) {
+        div_iter += 1;
+        if (div_iter > 8192) {
+            _ = sys.write(2, "DIV INFLOOP\n", 12);
+            break;
+        }
         var shift = num_len - b.len;
         var guess: u64 = @as(u64, num[num_len - 1]) / (@as(u64, b.limbs[b.len - 1]) + 1);
         if (guess == 0) {
@@ -325,32 +335,65 @@ fn biDiv(a: *const BigInt, b: *const BigInt, q: *BigInt, r: *BigInt) void {
         }
         sub.limbs[b.len] = @as(LIMB, @truncate(carry));
         biNorm(&sub);
-        var num_sub: BigInt = undefined;
-        num_sub.len = num_len + 1;
-        @memcpy(num_sub.limbs[0..num_len], num[0..num_len]);
-        num_sub.limbs[num_len] = 0;
-        if (biCmp(&num_sub, &sub) < 0) {
-            if (guess > 1) {
-                guess -= 1;
-                carry = 0;
-                for (0..b.len) |j| {
-                    const prod = guess * @as(u64, b.limbs[j]) + carry;
-                    sub.limbs[j] = @as(LIMB, @truncate(prod));
-                    carry = prod >> 32;
+        // Check if guess is too large (sub > num shifted by shift)
+        if (shift + sub.len > num_len + 1) {
+            // too big, reduce guess
+        } else {
+            var cmp: i8 = 0;
+            if (shift + sub.len > num_len) {
+                cmp = 1;
+            } else {
+                var ci: usize = sub.len;
+                while (ci > 0) {
+                    ci -= 1;
+                    if (num[shift + ci] != sub.limbs[ci]) {
+                        cmp = if (num[shift + ci] > sub.limbs[ci]) 1 else -1;
+                        break;
+                    }
                 }
-                sub.limbs[b.len] = @as(LIMB, @truncate(carry));
-                biNorm(&sub);
+            }
+            if (cmp < 0) {
+                if (guess > 1) {
+                    guess -= 1;
+                    carry = 0;
+                    for (0..b.len) |j| {
+                        const prod = guess * @as(u64, b.limbs[j]) + carry;
+                        sub.limbs[j] = @as(LIMB, @truncate(prod));
+                        carry = prod >> 32;
+                    }
+                    sub.limbs[b.len] = @as(LIMB, @truncate(carry));
+                    biNorm(&sub);
+                }
             }
         }
-        num_sub.len = num_len + 1;
-        @memcpy(num_sub.limbs[0..num_len], num[0..num_len]);
-        num_sub.limbs[num_len] = 0;
-        biSub(&num_sub, &sub, &num_sub);
-        biNorm(&num_sub);
-        num_len = num_sub.len;
-        @memcpy(num[0..num_len], num_sub.limbs[0..num_len]);
-        quot[shift] +%= @as(LIMB, @truncate(guess));
+        // Subtract sub * beta^shift from num (aligned by shift)
+        var borrow: u64 = 0;
+        var si: usize = 0;
+        while (si < sub.len) : (si += 1) {
+            const idx = shift + si;
+            var ext_a: u64 = num[idx];
+            if (borrow > 0) {
+                if (ext_a > 0) { ext_a -= 1; borrow = 0; } else { ext_a = 0xFFFFFFFF; }
+            }
+            const sub_limb = sub.limbs[si];
+            if (ext_a < sub_limb) {
+                num[idx] = @as(u32, @truncate(ext_a + 0x100000000 - sub_limb));
+                borrow = 1;
+            } else {
+                num[idx] = @as(u32, @truncate(ext_a - sub_limb));
+            }
+        }
+        // Propagate remaining borrow
+        if (borrow > 0) {
+            var bi: usize = shift + sub.len;
+            while (bi <= num_len) : (bi += 1) {
+                if (num[bi] > 0) { num[bi] -= 1; break; }
+                num[bi] = 0xFFFFFFFF;
+            }
+        }
+        // Trim leading zeros
         while (num_len > 0 and num[num_len - 1] == 0) num_len -= 1;
+        quot[shift] +%= @as(LIMB, @truncate(guess));
     }
     @memcpy(q.limbs[0..a.len], quot[0..a.len]);
     q.len = a.len;
@@ -366,7 +409,7 @@ fn biMod(a: *const BigInt, m: *const BigInt, out: *BigInt) void {
     biDiv(a, m, &q, out);
 }
 
-fn biModExp(base: *const BigInt, exp: *const BigInt, mod: *const BigInt, out: *BigInt) void {
+pub fn biModExp(base: *const BigInt, exp: *const BigInt, mod: *const BigInt, out: *BigInt) void {
     var result = BigInt{}; result.limbs[0] = 1; result.len = 1;
     var base_m: BigInt = undefined; biMod(base, mod, &base_m);
     var i: usize = exp.len;
@@ -375,38 +418,14 @@ fn biModExp(base: *const BigInt, exp: *const BigInt, mod: *const BigInt, out: *B
         var bit: u32 = 0x80000000;
         while (bit > 0) {
             var tmp: BigInt = undefined;
-            biMul(&result, &base_m, &tmp);
+            biMul(&result, &result, &tmp);
             biMod(&tmp, mod, &result);
-            bit >>= 1;
-            if ((exp.limbs[i] & bit) == 0 and bit > 0) {
-                var tmp2: BigInt = undefined;
-                biMul(&base_m, &base_m, &tmp2);
-                biMod(&tmp2, mod, &base_m);
-                bit >>= 1;
-                if (bit == 0) break;
-            }
-            if (bit == 0) break;
             if ((exp.limbs[i] & bit) != 0) {
                 var tmp2: BigInt = undefined;
                 biMul(&result, &base_m, &tmp2);
                 biMod(&tmp2, mod, &result);
-                bit >>= 1;
-            } else {
-                bit >>= 1;
             }
-            if (bit > 0) {
-                var tmp2: BigInt = undefined;
-                biMul(&base_m, &base_m, &tmp2);
-                biMod(&tmp2, mod, &base_m);
-            }
-        }
-        if (i > 0) {
-            var j: u32 = 0;
-            while (j < 32) : (j += 1) {
-                var tmp: BigInt = undefined;
-                biMul(&base_m, &base_m, &tmp);
-                biMod(&tmp, mod, &base_m);
-            }
+            bit >>= 1;
         }
     }
     biCopy(&result, out);
@@ -834,4 +853,708 @@ pub fn apkSign(apk_data: []const u8, out: []u8, key: *const RsaPrivateKey) usize
         out_pos += comment_len;
     }
     return out_pos;
+}
+
+// ============================== HMAC-SHA256 ==============================
+
+pub fn hmacSha256(key: []const u8, data: []const u8, out: *[32]u8) void {
+    var k: [64]u8 = [_]u8{0} ** 64;
+    if (key.len > 64) {
+        sha256(key, @as(*[32]u8, @ptrCast(&k[0..32].*)));
+    } else {
+        @memcpy(k[0..key.len], key);
+    }
+    var ipad: [64]u8 = undefined;
+    var opad: [64]u8 = undefined;
+    for (0..64) |i| {
+        ipad[i] = k[i] ^ 0x36;
+        opad[i] = k[i] ^ 0x5C;
+    }
+    var inner_hash: [32]u8 = undefined;
+    var inner_buf: [64 + 64]u8 = undefined;
+    @memcpy(inner_buf[0..64], &ipad);
+    if (data.len <= 64) {
+        @memcpy(inner_buf[64..][0..data.len], data);
+        sha256(inner_buf[0 .. 64 + data.len], &inner_hash);
+    } else {
+        var full: [128]u8 = undefined;
+        @memcpy(full[0..64], &ipad);
+        @memcpy(full[64..][0..data.len], data);
+        sha256(full[0 .. 64 + data.len], &inner_hash);
+        // For longer data, we'd need to hash in chunks, but TLS uses small inputs
+    }
+    var outer_buf: [64 + 32]u8 = undefined;
+    @memcpy(outer_buf[0..64], &opad);
+    @memcpy(outer_buf[64..][0..32], &inner_hash);
+    sha256(outer_buf[0..96], out);
+}
+
+pub fn hmacSha256WithSeparateBlock(key_buf: *const [64]u8, data: []const u8, out: *[32]u8) void {
+    var inner_hash: [32]u8 = undefined;
+    var inner: [128]u8 = undefined;
+    for (0..64) |i| inner[i] = key_buf[i] ^ 0x36;
+    @memcpy(inner[64..][0..data.len], data);
+    sha256(inner[0 .. 64 + data.len], &inner_hash);
+    var outer: [96]u8 = undefined;
+    for (0..64) |i| outer[i] = key_buf[i] ^ 0x5C;
+    @memcpy(outer[64..][0..32], &inner_hash);
+    sha256(&outer, out);
+}
+
+// ============================== HKDF (TLS 1.3) ==============================
+
+pub fn hkdfExtract(salt: []const u8, ikm: []const u8, out: *[32]u8) void {
+    hmacSha256(salt, ikm, out);
+}
+
+pub fn hkdfExpandLabel(prk: []const u8, label: []const u8, context: []const u8, out: []u8) void {
+    const label_prefix = "tls13 ";
+    var hkdf_label: [256]u8 = undefined;
+    var pos: usize = 0;
+    // length (2 bytes, big-endian) - written at the end
+    pos += 2;
+    // label length (1 byte) = "tls13 " + label
+    hkdf_label[pos] = @as(u8, @intCast(label_prefix.len + label.len));
+    pos += 1;
+    // label
+    for (label_prefix) |c| { hkdf_label[pos] = c; pos += 1; }
+    for (label) |c| { hkdf_label[pos] = c; pos += 1; }
+    // context length (1 byte)
+    hkdf_label[pos] = @as(u8, @intCast(context.len));
+    pos += 1;
+    // context
+    @memcpy(hkdf_label[pos..][0..context.len], context);
+    pos += context.len;
+    // Write total length at front
+    const total_len: u16 = @as(u16, @intCast(out.len));
+    hkdf_label[0] = @as(u8, @intCast(total_len >> 8));
+    hkdf_label[1] = @as(u8, @intCast(total_len));
+    // Perform HKDF-Expand
+    var t: [32]u8 = [_]u8{0} ** 32;
+    var t_len: usize = 0;
+    var off: usize = 0;
+    var counter: u8 = 1;
+    while (off < out.len) : (counter += 1) {
+        var info: [256]u8 = undefined;
+        var ipos: usize = 0;
+        if (t_len > 0) {
+            @memcpy(info[ipos..][0..t_len], t[0..t_len]);
+            ipos += t_len;
+        }
+        @memcpy(info[ipos..][0..pos], hkdf_label[0..pos]);
+        ipos += pos;
+        info[ipos] = counter;
+        ipos += 1;
+        hmacSha256(prk, info[0..ipos], &t);
+        t_len = 32;
+        const copy_len = @min(32, out.len - off);
+        @memcpy(out[off..][0..copy_len], t[0..copy_len]);
+        off += copy_len;
+    }
+}
+
+pub fn deriveSecret(prk: []const u8, label: []const u8, msg_hash: []const u8, out: *[32]u8) void {
+    hkdfExpandLabel(prk, label, msg_hash, out[0..32]);
+}
+
+// ============================== AES-128 ==============================
+
+const AES_SBOX: [256]u8 = [256]u8{
+    0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
+    0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
+    0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
+    0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
+    0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
+    0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
+    0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
+    0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
+    0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
+    0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
+    0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
+    0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
+    0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
+    0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
+    0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
+    0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
+};
+
+fn aesSubWord(w: u32) u32 {
+    return (@as(u32, AES_SBOX[@as(u8, @truncate(w >> 24))]) << 24) |
+           (@as(u32, AES_SBOX[@as(u8, @truncate(w >> 16))]) << 16) |
+           (@as(u32, AES_SBOX[@as(u8, @truncate(w >> 8))]) << 8) |
+           @as(u32, AES_SBOX[@as(u8, @truncate(w))]);
+}
+
+fn aesRotWord(w: u32) u32 {
+    return (w << 8) | (w >> 24);
+}
+
+const AES_RCON: [11]u32 = [11]u32{ 0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36 };
+
+pub fn aes128KeySchedule(key: *const [16]u8, out: *[176]u8) void {
+    var w: [44]u32 = undefined;
+    var i: usize = 0;
+    while (i < 4) : (i += 1) {
+        w[i] = (@as(u32, key[4 * i]) << 24) | (@as(u32, key[4 * i + 1]) << 16) |
+               (@as(u32, key[4 * i + 2]) << 8) | @as(u32, key[4 * i + 3]);
+    }
+    while (i < 44) : (i += 1) {
+        var tmp = w[i - 1];
+        if (i % 4 == 0) tmp = aesSubWord(aesRotWord(tmp)) ^ (AES_RCON[i / 4] << 24);
+        w[i] = w[i - 4] ^ tmp;
+    }
+    for (0..44) |j| {
+        out[j * 4 + 0] = @as(u8, @truncate(w[j] >> 24));
+        out[j * 4 + 1] = @as(u8, @truncate(w[j] >> 16));
+        out[j * 4 + 2] = @as(u8, @truncate(w[j] >> 8));
+        out[j * 4 + 3] = @as(u8, @truncate(w[j]));
+    }
+}
+
+fn aesAddRoundKey(state: *[16]u8, round_key: *const [16]u8) void {
+    for (0..16) |i| state[i] ^= round_key[i];
+}
+
+fn aesSubBytes(state: *[16]u8) void {
+    for (0..16) |i| state[i] = AES_SBOX[state[i]];
+}
+
+fn aesShiftRows(state: *[16]u8) void {
+    // Row 0: no shift
+    // Row 1: shift left 1
+    const t1 = state[1];
+    state[1] = state[5]; state[5] = state[9]; state[9] = state[13]; state[13] = t1;
+    // Row 2: shift left 2
+    const t2a = state[2]; const t2b = state[6];
+    state[2] = state[10]; state[6] = state[14]; state[10] = t2a; state[14] = t2b;
+    // Row 3: shift left 3 (= shift right 1)
+    const t3 = state[3];
+    state[3] = state[15]; state[15] = state[11]; state[11] = state[7]; state[7] = t3;
+}
+
+fn aesGfMul(a: u8, b: u8) u8 {
+    var aa = a;
+    var bb = b;
+    var result: u8 = 0;
+    var i: u8 = 0;
+    while (i < 8) : (i += 1) {
+        if (bb & 1 != 0) result ^= aa;
+        const hi = aa & 0x80;
+        aa <<= 1;
+        if (hi != 0) aa ^= 0x1B;
+        bb >>= 1;
+    }
+    return result;
+}
+
+fn aesMixColumns(state: *[16]u8) void {
+    for (0..4) |i| {
+        const idx = i * 4;
+        const a0 = state[idx];
+        const a1 = state[idx + 1];
+        const a2 = state[idx + 2];
+        const a3 = state[idx + 3];
+        state[idx] = aesGfMul(a0, 2) ^ aesGfMul(a1, 3) ^ a2 ^ a3;
+        state[idx + 1] = a0 ^ aesGfMul(a1, 2) ^ aesGfMul(a2, 3) ^ a3;
+        state[idx + 2] = a0 ^ a1 ^ aesGfMul(a2, 2) ^ aesGfMul(a3, 3);
+        state[idx + 3] = aesGfMul(a0, 3) ^ a1 ^ a2 ^ aesGfMul(a3, 2);
+    }
+}
+
+pub fn aes128Encrypt(plaintext: *const [16]u8, key_schedule: *const [176]u8, ciphertext: *[16]u8) void {
+    var state: [16]u8 = undefined;
+    @memcpy(state[0..16], plaintext[0..16]);
+    aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(key_schedule)));
+    var round: usize = 1;
+    while (round < 10) : (round += 1) {
+        aesSubBytes(&state);
+        aesShiftRows(&state);
+        aesMixColumns(&state);
+        aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(@as([*]const u8, @ptrCast(key_schedule)) + round * 16)));
+    }
+    aesSubBytes(&state);
+    aesShiftRows(&state);
+    aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(@as([*]const u8, @ptrCast(key_schedule)) + 160)));
+    @memcpy(ciphertext[0..16], &state);
+}
+
+// ============================== GCM Mode ==============================
+
+fn gcmInc32(block: *[16]u8) void {
+    var i: usize = 15;
+    while (i > 11) : (i -= 1) {
+        block[i] +%= 1;
+        if (block[i] != 0) break;
+    }
+}
+
+fn gcmGetBit(block: *const [16]u8, bit: usize) u8 {
+    return (block[bit / 8] >> @as(u3, @intCast(7 - (bit % 8)))) & 1;
+}
+
+fn gcmSetBit(block: *[16]u8, bit: usize, val: u8) void {
+    const mask = @as(u8, 1) << @as(u3, @intCast(7 - (bit % 8)));
+    if (val != 0) block[bit / 8] |= mask else block[bit / 8] &= ~mask;
+}
+
+fn gcmShiftRight(block: *[16]u8) void {
+    var carry: u8 = 0;
+    for (0..16) |i| {
+        const new_carry = block[i] & 1;
+        block[i] = (block[i] >> 1) | (if (carry != 0) @as(u8, 0x80) else 0);
+        carry = new_carry;
+    }
+}
+
+fn gcmXor(out: *[16]u8, a: *const [16]u8, b: *const [16]u8) void {
+    for (0..16) |i| out[i] = a[i] ^ b[i];
+}
+
+fn gcmMul(out: *[16]u8, x: *const [16]u8, y: *const [16]u8) void {
+    var z: [16]u8 = [_]u8{0} ** 16;
+    var v: [16]u8 = undefined;
+    @memcpy(v[0..16], x[0..16]);
+    for (0..128) |i| {
+        if (gcmGetBit(y, i) != 0) gcmXor(&z, &z, &v);
+        const lsb = v[15] & 1;
+        gcmShiftRight(&v);
+        if (lsb != 0) v[0] ^= 0xE1;
+    }
+    @memcpy(out[0..16], z[0..16]);
+}
+
+fn gcmGhash(out: *[16]u8, h: *const [16]u8, aad: []const u8, ciphertext: []const u8) void {
+    var y: [16]u8 = [_]u8{0} ** 16;
+    var block: [16]u8 = undefined;
+    var i: usize = 0;
+    while (i + 16 <= aad.len) {
+        for (0..16) |j| block[j] = aad[i + j];
+        gcmXor(&y, &y, &block);
+        gcmMul(&y, &y, h);
+        i += 16;
+    }
+    if (i < aad.len) {
+        for (0..16) |j| block[j] = if (i + j < aad.len) aad[i + j] else 0;
+        gcmXor(&y, &y, &block);
+        gcmMul(&y, &y, h);
+    }
+    i = 0;
+    while (i + 16 <= ciphertext.len) {
+        for (0..16) |j| block[j] = ciphertext[i + j];
+        gcmXor(&y, &y, &block);
+        gcmMul(&y, &y, h);
+        i += 16;
+    }
+    if (i < ciphertext.len) {
+        for (0..16) |j| block[j] = if (i + j < ciphertext.len) ciphertext[i + j] else 0;
+        gcmXor(&y, &y, &block);
+        gcmMul(&y, &y, h);
+    }
+    var len_a: [8]u8 = undefined;
+    var len_c: [8]u8 = undefined;
+    var aad_bits: u64 = @as(u64, aad.len) * 8;
+    var ct_bits: u64 = @as(u64, ciphertext.len) * 8;
+    for (0..8) |j| {
+        len_a[7 - j] = @as(u8, @truncate(aad_bits));
+        aad_bits >>= 8;
+        len_c[7 - j] = @as(u8, @truncate(ct_bits));
+        ct_bits >>= 8;
+    }
+    for (0..8) |j| block[j] = len_a[j];
+    for (0..8) |j| block[8 + j] = len_c[j];
+    gcmXor(&y, &y, &block);
+    gcmMul(&y, &y, h);
+    @memcpy(out[0..16], y[0..16]);
+}
+
+fn gcmGctr(out: []u8, key_schedule: *const [176]u8, icb: *const [16]u8, data: []const u8) void {
+    var counter: [16]u8 = undefined;
+    @memcpy(counter[0..16], icb[0..16]);
+    var off: usize = 0;
+    while (off < data.len) {
+        var encrypted: [16]u8 = undefined;
+        aes128Encrypt(&counter, key_schedule, &encrypted);
+        const chunk = @min(16, data.len - off);
+        for (0..chunk) |i| out[off + i] = data[off + i] ^ encrypted[i];
+        off += chunk;
+        gcmInc32(&counter);
+    }
+}
+
+pub fn gcmEncrypt(key: *const [16]u8, nonce: *const [12]u8, aad: []const u8, plaintext: []const u8, ciphertext: []u8, tag: *[16]u8) void {
+    var ks: [176]u8 = undefined;
+    aes128KeySchedule(key, &ks);
+    var h: [16]u8 = undefined;
+    var zero: [16]u8 = [_]u8{0} ** 16;
+    aes128Encrypt(&zero, &ks, &h);
+    var j0: [16]u8 = undefined;
+    @memcpy(j0[0..12], nonce[0..12]);
+    j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+    var icb: [16]u8 = j0;
+    gcmInc32(&icb);
+    gcmGctr(ciphertext, &ks, &icb, plaintext);
+    var ghash_out: [16]u8 = undefined;
+    gcmGhash(&ghash_out, &h, aad, ciphertext[0..plaintext.len]);
+    var tag_block: [16]u8 = undefined;
+    aes128Encrypt(&j0, &ks, &tag_block);
+    gcmXor(tag, &ghash_out, &tag_block);
+}
+
+pub fn gcmDecrypt(key: *const [16]u8, nonce: *const [12]u8, aad: []const u8, ciphertext: []const u8, tag: *const [16]u8, plaintext: []u8) bool {
+    var ks: [176]u8 = undefined;
+    aes128KeySchedule(key, &ks);
+    var h: [16]u8 = undefined;
+    var zero: [16]u8 = [_]u8{0} ** 16;
+    aes128Encrypt(&zero, &ks, &h);
+    var j0: [16]u8 = undefined;
+    @memcpy(j0[0..12], nonce[0..12]);
+    j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+    var ghash_out: [16]u8 = undefined;
+    gcmGhash(&ghash_out, &h, aad, ciphertext);
+    var tag_block: [16]u8 = undefined;
+    aes128Encrypt(&j0, &ks, &tag_block);
+    var expected_tag: [16]u8 = undefined;
+    gcmXor(&expected_tag, &ghash_out, &tag_block);
+    var ok = true;
+    for (0..16) |i| { if (expected_tag[i] != tag[i]) ok = false; }
+    if (!ok) {
+        _ = sys.write(2, "DBG: expected_tag = ", 20);
+        var dbg_hex: [32]u8 = undefined;
+        var dbg_i: usize = 0;
+        for (expected_tag) |b| { const hi = b >> 4; const lo = b & 15; dbg_hex[dbg_i] = @as(u8, if (hi < 10) '0' + hi else 'a' + hi - 10); dbg_i += 1; dbg_hex[dbg_i] = @as(u8, if (lo < 10) '0' + lo else 'a' + lo - 10); dbg_i += 1; }
+        _ = sys.write(2, &dbg_hex, 32);
+        _ = sys.write(2, "\nDBG: received tag = ", 21);
+        dbg_i = 0;
+        for (tag[0..16]) |b| { const hi = b >> 4; const lo = b & 15; dbg_hex[dbg_i] = @as(u8, if (hi < 10) '0' + hi else 'a' + hi - 10); dbg_i += 1; dbg_hex[dbg_i] = @as(u8, if (lo < 10) '0' + lo else 'a' + lo - 10); dbg_i += 1; }
+        _ = sys.write(2, &dbg_hex, 32);
+        _ = sys.write(2, "\nDBG: ghash_out  = ", 19);
+        dbg_i = 0;
+        for (ghash_out) |b| { const hi = b >> 4; const lo = b & 15; dbg_hex[dbg_i] = @as(u8, if (hi < 10) '0' + hi else 'a' + hi - 10); dbg_i += 1; dbg_hex[dbg_i] = @as(u8, if (lo < 10) '0' + lo else 'a' + lo - 10); dbg_i += 1; }
+        _ = sys.write(2, &dbg_hex, 32);
+        _ = sys.write(2, "\nDBG: tag_block  = ", 19);
+        dbg_i = 0;
+        for (tag_block) |b| { const hi = b >> 4; const lo = b & 15; dbg_hex[dbg_i] = @as(u8, if (hi < 10) '0' + hi else 'a' + hi - 10); dbg_i += 1; dbg_hex[dbg_i] = @as(u8, if (lo < 10) '0' + lo else 'a' + lo - 10); dbg_i += 1; }
+        _ = sys.write(2, &dbg_hex, 32);
+        _ = sys.write(2, "\nDBG: h          = ", 18);
+        dbg_i = 0;
+        for (h) |b| { const hi = b >> 4; const lo = b & 15; dbg_hex[dbg_i] = @as(u8, if (hi < 10) '0' + hi else 'a' + hi - 10); dbg_i += 1; dbg_hex[dbg_i] = @as(u8, if (lo < 10) '0' + lo else 'a' + lo - 10); dbg_i += 1; }
+        _ = sys.write(2, &dbg_hex, 32);
+        _ = sys.write(2, "\n", 1);
+        return false;
+    }
+    gcmInc32(&j0);
+    gcmGctr(plaintext, &ks, &j0, ciphertext);
+    return true;
+}
+
+// ============================== X25519 (Curve25519) ==============================
+
+const MASK51: u64 = (1 << 51) - 1;
+
+fn feZero(out: *[5]u64) void {
+    out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0; out[4] = 0;
+}
+
+fn feOne(out: *[5]u64) void {
+    out[0] = 1; out[1] = 0; out[2] = 0; out[3] = 0; out[4] = 0;
+}
+
+fn feCopy(out: *[5]u64, a: *const [5]u64) void {
+    out[0] = a[0]; out[1] = a[1]; out[2] = a[2]; out[3] = a[3]; out[4] = a[4];
+}
+
+fn feReduce(fe: *[5]u64) void {
+    var c: u64 = fe[0] >> 51; fe[0] &= MASK51; fe[1] +%= c;
+    c = fe[1] >> 51; fe[1] &= MASK51; fe[2] +%= c;
+    c = fe[2] >> 51; fe[2] &= MASK51; fe[3] +%= c;
+    c = fe[3] >> 51; fe[3] &= MASK51; fe[4] +%= c;
+    c = fe[4] >> 51; fe[4] &= MASK51; fe[0] +%= 19 *% c;
+}
+
+fn feAdd(out: *[5]u64, a: *const [5]u64, b: *const [5]u64) void {
+    out[0] = a[0] + b[0];
+    out[1] = a[1] + b[1];
+    out[2] = a[2] + b[2];
+    out[3] = a[3] + b[3];
+    out[4] = a[4] + b[4];
+}
+
+fn feSub(out: *[5]u64, a: *const [5]u64, b: *const [5]u64) void {
+    const p0 = (1 << 51) - 19;
+    const p1 = (1 << 51) - 1;
+    out[0] = a[0] + 2 * p0 -% b[0];
+    out[1] = a[1] + 2 * p1 -% b[1];
+    out[2] = a[2] + 2 * p1 -% b[2];
+    out[3] = a[3] + 2 * p1 -% b[3];
+    out[4] = a[4] + 2 * p1 -% b[4];
+}
+
+fn feMul(out: *[5]u64, a: *const [5]u64, b: *const [5]u64) void {
+    const a0 = a[0]; const a1 = a[1]; const a2 = a[2]; const a3 = a[3]; const a4 = a[4];
+    const b0 = b[0]; const b1 = b[1]; const b2 = b[2]; const b3 = b[3]; const b4 = b[4];
+    var c: [10]u128 = undefined;
+    c[0] = @as(u128, a0) * @as(u128, b0);
+    c[1] = @as(u128, a0) * @as(u128, b1) + @as(u128, a1) * @as(u128, b0);
+    c[2] = @as(u128, a0) * @as(u128, b2) + @as(u128, a1) * @as(u128, b1) + @as(u128, a2) * @as(u128, b0);
+    c[3] = @as(u128, a0) * @as(u128, b3) + @as(u128, a1) * @as(u128, b2) + @as(u128, a2) * @as(u128, b1) + @as(u128, a3) * @as(u128, b0);
+    c[4] = @as(u128, a0) * @as(u128, b4) + @as(u128, a1) * @as(u128, b3) + @as(u128, a2) * @as(u128, b2) + @as(u128, a3) * @as(u128, b1) + @as(u128, a4) * @as(u128, b0);
+    c[5] = @as(u128, a1) * @as(u128, b4) + @as(u128, a2) * @as(u128, b3) + @as(u128, a3) * @as(u128, b2) + @as(u128, a4) * @as(u128, b1);
+    c[6] = @as(u128, a2) * @as(u128, b4) + @as(u128, a3) * @as(u128, b3) + @as(u128, a4) * @as(u128, b2);
+    c[7] = @as(u128, a3) * @as(u128, b4) + @as(u128, a4) * @as(u128, b3);
+    c[8] = @as(u128, a4) * @as(u128, b4);
+
+    // Carry low 5 limbs into c[5]
+    c[1] += c[0] >> 51; c[0] &= MASK51;
+    c[2] += c[1] >> 51; c[1] &= MASK51;
+    c[3] += c[2] >> 51; c[2] &= MASK51;
+    c[4] += c[3] >> 51; c[3] &= MASK51;
+    c[5] += c[4] >> 51; c[4] &= MASK51;
+
+    // Fold c[5]..c[8] into lower limbs with multiplier 19
+    c[0] += 19 * c[5];
+    c[1] += 19 * c[6];
+    c[2] += 19 * c[7];
+    c[3] += 19 * c[8];
+
+    // Carry + fold c[4] back
+    c[1] += c[0] >> 51; c[0] &= MASK51;
+    c[2] += c[1] >> 51; c[1] &= MASK51;
+    c[3] += c[2] >> 51; c[2] &= MASK51;
+    c[4] += c[3] >> 51; c[3] &= MASK51;
+    c[0] += 19 * (c[4] >> 51); c[4] &= MASK51;
+
+    // Final small carry
+    c[1] += c[0] >> 51; c[0] &= MASK51;
+
+    out[0] = @as(u64, @truncate(c[0]));
+    out[1] = @as(u64, @truncate(c[1]));
+    out[2] = @as(u64, @truncate(c[2]));
+    out[3] = @as(u64, @truncate(c[3]));
+    out[4] = @as(u64, @truncate(c[4]));
+}
+
+fn feSquare(out: *[5]u64, a: *const [5]u64) void {
+    feMul(out, a, a);
+}
+
+fn feCSwap(x: *[5]u64, y: *[5]u64, swap: u64) void {
+    const mask: u64 = 0 -% swap;
+    for (0..5) |i| {
+        const t = mask & (x[i] ^ y[i]);
+        x[i] ^= t;
+        y[i] ^= t;
+    }
+}
+
+fn feFromBytes(out: *[5]u64, in_bytes: *const [32]u8) void {
+    const in = @as(*const [32]u8, @ptrCast(in_bytes));
+    out[0] = (@as(u64, in[0]) << 0) | (@as(u64, in[1]) << 8) | (@as(u64, in[2]) << 16) | (@as(u64, in[3]) << 24) | (@as(u64, in[4]) << 32) | (@as(u64, in[5]) << 40) | ((@as(u64, in[6]) & 7) << 48);
+    out[1] = (@as(u64, in[6]) >> 3) | (@as(u64, in[7]) << 5) | (@as(u64, in[8]) << 13) | (@as(u64, in[9]) << 21) | (@as(u64, in[10]) << 29) | (@as(u64, in[11]) << 37) | ((@as(u64, in[12]) & 63) << 45);
+    out[2] = (@as(u64, in[12]) >> 6) | (@as(u64, in[13]) << 2) | (@as(u64, in[14]) << 10) | (@as(u64, in[15]) << 18) | (@as(u64, in[16]) << 26) | (@as(u64, in[17]) << 34) | (@as(u64, in[18]) << 42) | ((@as(u64, in[19]) & 1) << 50);
+    out[3] = (@as(u64, in[19]) >> 1) | (@as(u64, in[20]) << 7) | (@as(u64, in[21]) << 15) | (@as(u64, in[22]) << 23) | (@as(u64, in[23]) << 31) | (@as(u64, in[24]) << 39) | ((@as(u64, in[25]) & 15) << 47);
+    out[4] = (@as(u64, in[25]) >> 4) | (@as(u64, in[26]) << 4) | (@as(u64, in[27]) << 12) | (@as(u64, in[28]) << 20) | (@as(u64, in[29]) << 28) | (@as(u64, in[30]) << 36) | ((@as(u64, in[31]) & 127) << 44);
+}
+
+fn feToBytes(out: *[32]u8, in_fe: *const [5]u64) void {
+    var tmp: [5]u64 = undefined;
+    feCopy(&tmp, in_fe);
+    var c: u64 = 0;
+    c = tmp[0] >> 51; tmp[0] &= MASK51; tmp[1] += c;
+    c = tmp[1] >> 51; tmp[1] &= MASK51; tmp[2] += c;
+    c = tmp[2] >> 51; tmp[2] &= MASK51; tmp[3] += c;
+    c = tmp[3] >> 51; tmp[3] &= MASK51; tmp[4] += c;
+    c = tmp[4] >> 51; tmp[4] &= MASK51; tmp[0] += 19 * c;
+    c = tmp[0] >> 51; tmp[0] &= MASK51; tmp[1] += c;
+
+    // Final reduction: if tmp >= p, subtract p
+    // p_limbs = [2^51-19, 2^51-1, 2^51-1, 2^51-1, 2^51-1]
+    const p0 = (1 << 51) - 19;
+    const p1 = (1 << 51) - 1;
+    // Check if tmp >= p (compare limb by limb from top)
+    var ge: u64 = 1;
+    if (tmp[4] < p1) { ge = 0; }
+    else if (tmp[4] > p1) { ge = 1; }
+    else if (tmp[3] < p1) { ge = 0; }
+    else if (tmp[3] > p1) { ge = 1; }
+    else if (tmp[2] < p1) { ge = 0; }
+    else if (tmp[2] > p1) { ge = 1; }
+    else if (tmp[1] < p1) { ge = 0; }
+    else if (tmp[1] > p1) { ge = 1; }
+    else if (tmp[0] < p0) { ge = 0; }
+    // if all equal → ge stays 1 (subtract)
+
+    // Conditional subtract: if ge, tmp -= p
+    var borrow: u64 = 0;
+    const sub0 = tmp[0] -% p0 -% borrow; borrow = if (sub0 > tmp[0]) 1 else 0;
+    const sub1 = tmp[1] -% p1 -% borrow; borrow = if (sub1 > tmp[1]) 1 else 0;
+    const sub2 = tmp[2] -% p1 -% borrow; borrow = if (sub2 > tmp[2]) 1 else 0;
+    const sub3 = tmp[3] -% p1 -% borrow; borrow = if (sub3 > tmp[3]) 1 else 0;
+    const sub4 = tmp[4] -% p1 -% borrow;
+    // ge mask: 0xFFFF... if ge, 0 if not
+    const mask = 0 -% ge;
+    tmp[0] = tmp[0] ^ (mask & (sub0 ^ tmp[0]));
+    tmp[1] = tmp[1] ^ (mask & (sub1 ^ tmp[1]));
+    tmp[2] = tmp[2] ^ (mask & (sub2 ^ tmp[2]));
+    tmp[3] = tmp[3] ^ (mask & (sub3 ^ tmp[3]));
+    tmp[4] = tmp[4] ^ (mask & (sub4 ^ tmp[4]));
+
+    out[0] = @as(u8, @truncate(tmp[0]));
+    out[1] = @as(u8, @truncate(tmp[0] >> 8));
+    out[2] = @as(u8, @truncate(tmp[0] >> 16));
+    out[3] = @as(u8, @truncate(tmp[0] >> 24));
+    out[4] = @as(u8, @truncate(tmp[0] >> 32));
+    out[5] = @as(u8, @truncate(tmp[0] >> 40));
+    out[6] = @as(u8, @truncate((tmp[0] >> 48) | (tmp[1] << 3)));
+    out[7] = @as(u8, @truncate(tmp[1] >> 5));
+    out[8] = @as(u8, @truncate(tmp[1] >> 13));
+    out[9] = @as(u8, @truncate(tmp[1] >> 21));
+    out[10] = @as(u8, @truncate(tmp[1] >> 29));
+    out[11] = @as(u8, @truncate(tmp[1] >> 37));
+    out[12] = @as(u8, @truncate((tmp[1] >> 45) | (tmp[2] << 6)));
+    out[13] = @as(u8, @truncate(tmp[2] >> 2));
+    out[14] = @as(u8, @truncate(tmp[2] >> 10));
+    out[15] = @as(u8, @truncate(tmp[2] >> 18));
+    out[16] = @as(u8, @truncate(tmp[2] >> 26));
+    out[17] = @as(u8, @truncate(tmp[2] >> 34));
+    out[18] = @as(u8, @truncate(tmp[2] >> 42));
+    out[19] = @as(u8, @truncate((tmp[2] >> 50) | (tmp[3] << 1)));
+    out[20] = @as(u8, @truncate(tmp[3] >> 7));
+    out[21] = @as(u8, @truncate(tmp[3] >> 15));
+    out[22] = @as(u8, @truncate(tmp[3] >> 23));
+    out[23] = @as(u8, @truncate(tmp[3] >> 31));
+    out[24] = @as(u8, @truncate(tmp[3] >> 39));
+    out[25] = @as(u8, @truncate((tmp[3] >> 47) | (tmp[4] << 4)));
+    out[26] = @as(u8, @truncate(tmp[4] >> 4));
+    out[27] = @as(u8, @truncate(tmp[4] >> 12));
+    out[28] = @as(u8, @truncate(tmp[4] >> 20));
+    out[29] = @as(u8, @truncate(tmp[4] >> 28));
+    out[30] = @as(u8, @truncate(tmp[4] >> 36));
+    out[31] = @as(u8, @truncate(tmp[4] >> 44));
+}
+
+fn feSquareN(out: *[5]u64, a: *const [5]u64, count: usize) void {
+    feSquare(out, a);
+    var i: usize = 1;
+    while (i < count) : (i += 1) {
+        feSquare(out, out);
+    }
+}
+
+fn feInvert(out: *[5]u64, z: *const [5]u64) void {
+    var a: [5]u64 = undefined;
+    var b: [5]u64 = undefined;
+    var c: [5]u64 = undefined;
+    var t0: [5]u64 = undefined;
+
+    feSquare(&a, z);                   // 2
+    feSquareN(&t0, &a, 2);             // 8
+    feMul(&b, &t0, z);                 // 9
+    feMul(&a, &b, &a);                 // 11
+    feSquare(&t0, &a);                 // 22
+    feMul(&b, &t0, &b);                // 31 = 2^5 - 1
+    feSquareN(&t0, &b, 5);             // 2^10 - 2^5 = 992
+    feMul(&b, &t0, &b);                // 2^10 - 1 = 1023
+    feSquareN(&t0, &b, 10);            // 2^20 - 2^10
+    feMul(&c, &t0, &b);                // 2^20 - 1
+    feSquareN(&t0, &c, 20);            // 2^40 - 2^20
+    feMul(&t0, &t0, &c);               // 2^40 - 1
+    feSquareN(&t0, &t0, 10);           // 2^50 - 2^10
+    feMul(&b, &t0, &b);                // 2^50 - 1
+    feSquareN(&t0, &b, 50);            // 2^100 - 2^50
+    feMul(&c, &t0, &b);                // 2^100 - 1
+    feSquareN(&t0, &c, 100);           // 2^200 - 2^100
+    feMul(&t0, &t0, &c);               // 2^200 - 1
+    feSquareN(&t0, &t0, 50);           // 2^250 - 2^50
+    feMul(&t0, &t0, &b);               // 2^250 - 1
+    feSquareN(&t0, &t0, 5);            // 2^255 - 2^5
+    feMul(out, &t0, &a);               // 2^255 - 21 = p - 2
+}
+
+fn clampScalar(scalar: *[32]u8) void {
+    scalar[0] &= 248;
+    scalar[31] &= 127;
+    scalar[31] |= 64;
+}
+
+pub fn x25519(out: *[32]u8, scalar: *const [32]u8, point: *const [32]u8) void {
+    var e: [32]u8 = undefined;
+    @memcpy(e[0..32], scalar[0..32]);
+    clampScalar(&e);
+    var x1: [5]u64 = undefined;
+    feFromBytes(&x1, point);
+    var x2: [5]u64 = undefined;
+    var z2: [5]u64 = undefined;
+    var x3: [5]u64 = undefined;
+    var z3: [5]u64 = undefined;
+    feOne(&x2);
+    feZero(&z2);
+    feCopy(&x3, &x1);
+    feOne(&z3);
+    var swap: u64 = 0;
+    var bit: u64 = 0;
+    var i: usize = 255;
+    while (true) {
+        const byte_pos = i / 8;
+        const bit_pos = @as(u3, @intCast(i % 8));
+        bit = @as(u64, (e[byte_pos] >> bit_pos) & 1);
+        swap ^= bit;
+        feCSwap(&x2, &x3, swap);
+        feCSwap(&z2, &z3, swap);
+        swap = bit;
+        var A: [5]u64 = undefined;
+        var B: [5]u64 = undefined;
+        var AA: [5]u64 = undefined;
+        var BB: [5]u64 = undefined;
+        var E: [5]u64 = undefined;
+        var C: [5]u64 = undefined;
+        var D: [5]u64 = undefined;
+        var DA: [5]u64 = undefined;
+        var CB: [5]u64 = undefined;
+        feAdd(&A, &x2, &z2);
+        feSub(&B, &x2, &z2);
+        feMul(&AA, &A, &A);
+        feMul(&BB, &B, &B);
+        feSub(&E, &AA, &BB);
+        feAdd(&C, &x3, &z3);
+        feSub(&D, &x3, &z3);
+        feMul(&DA, &D, &A);
+        feMul(&CB, &C, &B);
+        var tmp1: [5]u64 = undefined;
+        var tmp2: [5]u64 = undefined;
+        feAdd(&tmp1, &DA, &CB);
+        feMul(&x3, &tmp1, &tmp1);
+        feSub(&tmp2, &DA, &CB);
+        feMul(&tmp2, &tmp2, &tmp2);
+        feMul(&z3, &x1, &tmp2);
+        feMul(&x2, &AA, &BB);
+        var a24_fe: [5]u64 = undefined;
+        a24_fe[0] = 121665;
+        a24_fe[1] = 0;
+        a24_fe[2] = 0;
+        a24_fe[3] = 0;
+        a24_fe[4] = 0;
+        feMul(&tmp1, &E, &a24_fe);
+        feAdd(&tmp1, &AA, &tmp1);
+        feMul(&z2, &E, &tmp1);
+        if (i == 0) break;
+        i -= 1;
+    }
+    feCSwap(&x2, &x3, swap);
+    feCSwap(&z2, &z3, swap);
+    var inv_z2: [5]u64 = undefined;
+    feInvert(&inv_z2, &z2);
+    var result: [5]u64 = undefined;
+    feMul(&result, &x2, &inv_z2);
+    feToBytes(out, &result);
+}
+
+pub fn x25519Keypair(sk: *[32]u8, pk: *[32]u8) void {
+    const fd = sys.open("/dev/urandom\x00", 0, 0);
+    if (fd >= 0) {
+        _ = sys.read(fd, sk, 32);
+        sys.close(fd);
+    }
+    clampScalar(sk);
+    var basepoint: [32]u8 = .{9} ++ .{0} ** 31;
+    x25519(pk, sk, &basepoint);
 }

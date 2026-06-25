@@ -250,6 +250,43 @@ pub const X11Conn = struct {
         writeAll(self.fd, &buf);
     }
 
+    pub fn putImageRegion(self: *X11Conn, pixels: [*]u32, stride: u32, src_x: u32, src_y: u32, w: u32, h: u32, dst_x: i16, dst_y: i16) void {
+        if (w == 0 or h == 0) return;
+        const row_pad = @as(u32, @intCast(@as(i32, -@as(i32, @intCast(w * 4))) & 3));
+        const row_bytes = w * 4 + row_pad;
+        const hdr_bytes: u32 = 24;
+        const max_units: u32 = 65535;
+        const max_rows_per_req = (max_units * 4 - hdr_bytes) / row_bytes;
+        var ry: u32 = 0;
+        while (ry < h) {
+            const batch_h = if (h - ry > max_rows_per_req) max_rows_per_req else h - ry;
+            const total = row_bytes * batch_h;
+            const units: u16 = @as(u16, @intCast((hdr_bytes + total + 3) / 4));
+            var hdr: [24]u8 = undefined;
+            hdr[0] = 72; hdr[1] = 2;
+            write16(&hdr, 2, units);
+            write32(&hdr, 4, self.wid);
+            write32(&hdr, 8, self.gc);
+            write16(&hdr, 12, @as(u16, @intCast(w)));
+            write16(&hdr, 14, @as(u16, @intCast(batch_h)));
+            write16(&hdr, 16, @as(u16, @bitCast(dst_x)));
+            write16(&hdr, 18, @as(u16, @bitCast(dst_y + @as(i16, @intCast(ry)))));
+            hdr[20] = 0; hdr[21] = @as(u8, @intCast(self.depth));
+            hdr[22] = 0; hdr[23] = 0;
+            writeAll(self.fd, &hdr);
+            var brow: u32 = 0;
+            while (brow < batch_h) : (brow += 1) {
+                const src = pixels + ((src_y + ry + brow) * stride + src_x);
+                writeAll(self.fd, @as([*]u8, @ptrCast(src))[0..(w * 4)]);
+                if (row_pad > 0) {
+                    var pad: [4]u8 = undefined;
+                    writeAll(self.fd, pad[0..row_pad]);
+                }
+            }
+            ry += batch_h;
+        }
+    }
+
     pub fn putImage(self: *X11Conn, pixels: [*]u32, w: u32, h: u32) void {
         const row_pad = @as(u32, @intCast(@as(i32, -@as(i32, @intCast(w * 4))) & 3));
         const row_bytes = w * 4 + row_pad;
@@ -299,6 +336,64 @@ pub const X11Conn = struct {
         if (t == 4 or t == 5) return XEvent{ .type = t, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 24), .event_y = readI16(&buf, 26) };
         if (t == 6) return XEvent{ .type = 6, .keycode = 0, .width = 0, .height = 0, .detail = buf[1], .event_x = readI16(&buf, 24), .event_y = readI16(&buf, 26) };
         return null;
+    }
+
+    pub fn changeGC(self: *X11Conn, mask: u32, values: []const u32) void {
+        const num = @as(usize, @popCount(mask));
+        const total = 12 + num * 4;
+        const rlen: u16 = @as(u16, @intCast(total / 4));
+        var buf: [32]u8 = undefined;
+        buf[0] = 56; buf[1] = 0;
+        write16(&buf, 2, rlen);
+        write32(&buf, 4, self.gc);
+        write32(&buf, 8, mask);
+        var off: usize = 12;
+        var i: usize = 0;
+        while (i < num) : (i += 1) {
+            write32(&buf, off, values[i]);
+            off += 4;
+        }
+        writeAll(self.fd, buf[0..total]);
+    }
+
+    pub fn setFillColor(self: *X11Conn, pixel: u32) void {
+        self.changeGC(4, &[_]u32{pixel});
+    }
+
+    pub fn fillRect(self: *X11Conn, x: i16, y: i16, w: u16, h: u16) void {
+        if (w == 0 or h == 0) return;
+        var buf: [20]u8 = undefined;
+        buf[0] = 0x46; buf[1] = 0;
+        write16(&buf, 2, 5);
+        write32(&buf, 4, self.gc);
+        write16(&buf, 8, @as(u16, @bitCast(x)));
+        write16(&buf, 10, @as(u16, @bitCast(y)));
+        write16(&buf, 12, w);
+        write16(&buf, 14, h);
+        write16(&buf, 16, 0);
+        write16(&buf, 18, 0);
+        writeAll(self.fd, &buf);
+    }
+
+    pub fn fillRects(self: *X11Conn, rects: []const struct { x: i16, y: i16, w: u16, h: u16 }) void {
+        const n = rects.len;
+        if (n == 0) return;
+        const total = 8 + n * 8;
+        const rlen: u16 = @as(u16, @intCast(total / 4));
+        var buf: [1024]u8 = undefined;
+        buf[0] = 0x46; buf[1] = 0;
+        write16(&buf, 2, rlen);
+        write32(&buf, 4, self.gc);
+        var off: usize = 8;
+        var i: usize = 0;
+        while (i < n) : (i += 1) {
+            const r = rects[i];
+            write16(&buf, off, @as(u16, @bitCast(r.x))); off += 2;
+            write16(&buf, off, @as(u16, @bitCast(r.y))); off += 2;
+            write16(&buf, off, r.w); off += 2;
+            write16(&buf, off, r.h); off += 2;
+        }
+        writeAll(self.fd, buf[0..total]);
     }
 
     pub fn close(self: *X11Conn) void {
@@ -413,4 +508,90 @@ pub fn x11Open(display_num: i32) ?X11Conn {
         .fd = fd, .root = root, .white_pixel = white, .black_pixel = black,
         .w = ww, .h = hh, .depth = depth, .wid = id_base + 1, .gc = id_base + 2,
     };
+}
+
+pub const X11Display = struct {
+    pixels: [*]u32,
+    width: u32,
+    height: u32,
+    stride: u32,
+    xconn: *X11Conn,
+    window: u32,
+    gc: u32,
+};
+
+pub export fn x11CreateDisplay(w: u32, h: u32, title: [*:0]const u8) ?*X11Display {
+    const conn_ptr = sys.mmap(null, @sizeOf(X11Conn), 3, 34, -1, 0) orelse return null;
+    var conn = x11Open(0) orelse return null;
+    conn.createWindow(0, 0, @intCast(w), @intCast(h));
+    var tlen: usize = 0;
+    while (title[tlen] != 0) : (tlen += 1) {}
+    conn.setTitle(title[0..tlen]);
+    conn.selectInput(0x40001); // KeyPressMask | ExposureMask
+    conn.mapWindow();
+    conn.createGC();
+    const pix_size = @as(usize, w) * h * 4;
+    const fb = sys.mmap(null, pix_size, 3, 34, -1, 0) orelse return null;
+    const disp_ptr = sys.mmap(null, @sizeOf(X11Display), 3, 34, -1, 0) orelse return null;
+    const disp = @as(*X11Display, @ptrCast(@alignCast(disp_ptr)));
+    disp.pixels = @ptrCast(@alignCast(fb));
+    disp.width = w;
+    disp.height = h;
+    disp.stride = w;
+    disp.xconn = @as(*X11Conn, @ptrCast(@alignCast(conn_ptr)));
+    disp.xconn.* = conn;
+    disp.window = conn.wid;
+    disp.gc = conn.gc;
+    return disp;
+}
+
+pub export fn x11Present(disp: *X11Display) void {
+    disp.xconn.putImage(disp.pixels, disp.width, disp.height);
+    // XFlush is implicit in putImage on the next request
+    var flush_buf: [4]u8 = .{0,0,0,0};
+    _ = sys.write(disp.xconn.fd, &flush_buf, 0); // dummy flush
+}
+
+pub export fn x11PollEvent(disp: *X11Display) u32 {
+    const ev = disp.xconn.nextEvent() orelse return 0;
+    // Write event data to shared addresses for gui_ev_x/y/action/keycode
+    const addr: u64 = 0x200100;
+    const ev_type = ev.type;
+    var unified: u32 = 0;
+    // X11 event types: 2=KeyPress, 3=KeyRelease, 4=ButtonPress, 5=ButtonRelease, 6=MotionNotify, 12=Expose
+    if (ev_type == 4) {
+        unified = 1; // touch/button down
+        var x = ev.event_x;
+        var y = ev.event_y;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        @as(*volatile i32, @ptrFromInt(addr + 56)).* = @intCast(x);
+        @as(*volatile i32, @ptrFromInt(addr + 60)).* = @intCast(y);
+        @as(*volatile u32, @ptrFromInt(addr + 68)).* = 0; // down action
+        @as(*volatile u32, @ptrFromInt(addr + 64)).* = 1;
+    } else if (ev_type == 5) {
+        unified = 2; // touch/button up
+        @as(*volatile u32, @ptrFromInt(addr + 68)).* = 1; // up action
+        @as(*volatile u32, @ptrFromInt(addr + 64)).* = 0;
+    } else if (ev_type == 6) {
+        unified = 3; // motion
+        @as(*volatile u32, @ptrFromInt(addr + 68)).* = 2; // move action
+        @as(*volatile u32, @ptrFromInt(addr + 64)).* = 1;
+        var x = ev.event_x;
+        var y = ev.event_y;
+        if (x < 0) x = 0;
+        if (y < 0) y = 0;
+        @as(*volatile i32, @ptrFromInt(addr + 56)).* = @intCast(x);
+        @as(*volatile i32, @ptrFromInt(addr + 60)).* = @intCast(y);
+    } else if (ev_type == 2) {
+        unified = 4; // key down
+        @as(*volatile u32, @ptrFromInt(addr + 76)).* = 0;
+        @as(*volatile u32, @ptrFromInt(addr + 80)).* = ev.keycode;
+    } else if (ev_type == 3) {
+        unified = 5; // key up
+        @as(*volatile u32, @ptrFromInt(addr + 76)).* = 1;
+        @as(*volatile u32, @ptrFromInt(addr + 80)).* = ev.keycode;
+    }
+    @as(*volatile u32, @ptrFromInt(addr + 504)).* = unified; // cur_ev_type
+    return unified;
 }

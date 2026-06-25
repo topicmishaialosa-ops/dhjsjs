@@ -56,9 +56,9 @@
 
 ## Font System
 - Custom 8×8 bitmap font (hand-designed, 95 glyphs ASCII 32–126)
-- FONT_W=8, FONT_H=8 (u8 per row, was u16 for old 10×16)
-- drawText mask changed from u16 to u8
-- Consistent across all display backends
+- FONT_W=8, FONT_H=8 (u8 per row)
+- Redesigned glyphs for improved legibility — smoother curves on all letters, numbers, punctuation
+- Consistently drawn across all display backends (X11, Wayland, TTY, Win32)
 
 ## GPU/Framebuffer API (dhjsjs builtins)
 - `fb_open(w, h)` → framebuffer object
@@ -66,13 +66,18 @@
 - `fb_fill(fb, x, y, w, h, color)` → fill rect
 - `fb_close(fb)` → free framebuffer
 
-## GUI System (gui.zig)
-- Widget tree with event propagation
-- Components: Window, Button, Label, Slider, TextEdit, ScrollArea, Card
-- Style system with colors, fonts, window_rounding
-- Modern theme presets: style_modern_dark, style_modern_light
-- guiApp/guiapp builtin → fork+exec gui_srv
+## GUI System (gui.zig / gui_render.zig)
+- Immediate-mode widget tree with event propagation
+- Components: Window, Button, Label, Slider, TextEdit, ScrollArea, Card, RadioButton, ProgressBar, ListBox, Tooltip, TabBar, ColorPicker
+- Gradient-filled widgets with multi-layer soft shadows and glow effects
+- Style system: 30 customizable fields (colors, rounding, shadow, spacing, padding)
+- **StyleBuilder (Zig)**: chained API for building custom styles in code
+- **setStyle(fd, id, val) builtin**: change any style field from dhjsjs language
+- Theme presets: Dark, Light, Modern Dark, Modern Light, **Diamond (purple)**
+- New primitives: `guiTriangle`, `guiGlassPanel`, `guiShadow`
+- guiApp/guiServer builtin → fork+exec gui_srv with 61-byte command protocol
 - setTheme(fd, theme_id) builtin for runtime theme switching
+- Glass panel effect with alpha blending (no external dependencies)
 - setStyleColor(fd, field_index, color) builtin for per-field color override (0=BG,1=PANEL_BG,2=BTN_BG,3=BTN_HOVER,4=TEXT_COL,5=ACCENT,6=BORDER,7=CHECK_MARK,8=INPUT_BG,9=SEPARATOR)
 - setStyleRounding(fd, rounding) builtin for widget corner rounding
 - drawCard() helper for rendering card-style panels

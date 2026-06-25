@@ -2,41 +2,44 @@ pub const ANDROID_FB_ADDR: u64 = 0x200000;
 pub const ANDROID_CMD_ADDR: u64 = 0x200100;
 
 pub const AndroidCmd = extern struct {
-    activity_ptr: u64,
-    window_ptr: u64,
-    input_queue_ptr: u64,
-    has_window: u32,
-    has_focus: u32,
-    should_finish: u32,
-    fb_width: u32,
-    fb_height: u32,
-    fb_stride: u32,
-    fb_pixels: u64,
-    touch_x: f32,
-    touch_y: f32,
-    touch_down: u32,
-    touch_action: u32,
-    touch_pointer_id: u32,
-    key_action: u32,
-    key_code: u32,
-    lock_fn: u64,
-    unlock_fn: u64,
-    get_event_fn: u64,
-    finish_event_fn: u64,
-    get_event_type_fn: u64,
-    get_action_fn: u64,
-    get_x_fn: u64,
-    get_y_fn: u64,
-    get_keycode_fn: u64,
-    present_fn: u64,
-    touch_count: u32,
-    touch_x_arr: [16]f32,
-    touch_y_arr: [16]f32,
-    touch_down_arr: [16]u32,
-    touch_id_arr: [16]u32,
-    clicked: u32,
-    click_x: f32,
-    click_y: f32,
+    activity_ptr: u64,          // 0
+    window_ptr: u64,            // 8
+    input_queue_ptr: u64,       // 16
+    has_window: u32,            // 24
+    has_focus: u32,             // 28
+    should_finish: u32,         // 32
+    fb_width: u32,              // 36
+    fb_height: u32,             // 40
+    fb_stride: u32,             // 44
+    fb_pixels: u64,             // 48
+    touch_x: i32,               // 56 (integer pixel coord)
+    touch_y: i32,               // 60
+    touch_down: u32,            // 64
+    touch_action: u32,          // 68 (0=down,1=up,2=move)
+    touch_pointer_id: u32,      // 72
+    key_action: u32,            // 76 (0=down,1=up)
+    key_code: u32,              // 80
+    lock_fn: u64,               // 88
+    unlock_fn: u64,             // 96
+    get_event_fn: u64,          // 104
+    finish_event_fn: u64,       // 112
+    get_event_type_fn: u64,     // 120
+    get_action_fn: u64,         // 128
+    get_x_fn: u64,              // 136
+    get_y_fn: u64,              // 144
+    get_keycode_fn: u64,        // 152
+    present_fn: u64,            // 160
+    touch_count: u32,           // 168
+    touch_x_arr: [16]i32,       // 172
+    touch_y_arr: [16]i32,       // 236
+    touch_down_arr: [16]u32,    // 300
+    touch_action_arr: [16]u32,  // 364
+    touch_id_arr: [16]u32,      // 428
+    clicked: u32,               // 492
+    click_x: i32,               // 496
+    click_y: i32,               // 500
+    cur_ev_type: u32,           // 504 (1=touch_down,2=touch_up,3=touch_move,4=key_down,5=key_up)
+    event_cursor: u32,          // 508
 };
 
 pub const AndroidFb = struct {
@@ -73,12 +76,15 @@ pub fn initCmd() AndroidCmd {
         .get_keycode_fn = 0,
         .present_fn = 0,
         .touch_count = 0,
-        .touch_x_arr = [_]f32{0} ** 16,
-        .touch_y_arr = [_]f32{0} ** 16,
+        .touch_x_arr = [_]i32{0} ** 16,
+        .touch_y_arr = [_]i32{0} ** 16,
         .touch_down_arr = [_]u32{0} ** 16,
+        .touch_action_arr = [_]u32{0} ** 16,
         .touch_id_arr = [_]u32{0} ** 16,
         .clicked = 0,
         .click_x = 0,
         .click_y = 0,
+        .cur_ev_type = 0,
+        .event_cursor = 0,
     };
 }

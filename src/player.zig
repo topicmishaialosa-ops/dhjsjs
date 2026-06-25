@@ -375,3 +375,12 @@ pub const Player = struct {
         };
     }
 };
+
+pub export fn playFile(path: [*:0]const u8) u8 {
+    var p = Player.init();
+    if (!p.loadFile(path)) return 0;
+    if (!p.openDsp()) return 0;
+    if (!p.play()) return 0;
+    while (p.update()) {}
+    return 1;
+}

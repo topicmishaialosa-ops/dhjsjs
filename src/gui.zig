@@ -1,11 +1,14 @@
 const gfx = @import("render.zig");
 pub const mouse = @import("mouse.zig");
 
+pub var current_canvas: ?*gfx.Canvas = null;
+
 pub const MAX_ID_STACK: usize = 64;
 pub const MAX_LAYOUT_STACK: usize = 64;
 pub const MAX_WINDOW_STACK: usize = 16;
 pub const MAX_STATE_ITEMS: usize = 128;
 pub const MAX_KEY: usize = 256;
+pub const MAX_STYLE_STACK: usize = 16;
 
 pub const Style = struct {
     bg: u32,
@@ -57,6 +60,49 @@ pub const Style = struct {
     pub fn setShadow(s: *Style, v: u8) void { s.shadow = v; }
     pub fn setSpacing(s: *Style, v: u8) void { s.spacing = v; }
     pub fn setPadding(s: *Style, v: u8) void { s.padding = v; }
+};
+
+pub const StyleBuilder = struct {
+    style: Style,
+
+    pub fn init(base: Style) StyleBuilder {
+        return StyleBuilder{ .style = base };
+    }
+
+    pub fn bg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.bg = c; return self; }
+    pub fn panelBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.panel_bg = c; return self; }
+    pub fn buttonBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.button_bg = c; return self; }
+    pub fn buttonHover(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.button_hover = c; return self; }
+    pub fn buttonActive(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.button_active = c; return self; }
+    pub fn buttonText(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.button_text = c; return self; }
+    pub fn text(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.text = c; return self; }
+    pub fn textDim(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.text_dim = c; return self; }
+    pub fn accent(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.accent = c; return self; }
+    pub fn accentHover(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.accent_hover = c; return self; }
+    pub fn inputBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.input_bg = c; return self; }
+    pub fn inputBorder(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.input_border = c; return self; }
+    pub fn inputText(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.input_text = c; return self; }
+    pub fn border(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.border = c; return self; }
+    pub fn sliderTrack(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.slider_track = c; return self; }
+    pub fn sliderThumb(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.slider_thumb = c; return self; }
+    pub fn separator(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.separator = c; return self; }
+    pub fn headerBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.header_bg = c; return self; }
+    pub fn headerText(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.header_text = c; return self; }
+    pub fn titleBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.title_bg = c; return self; }
+    pub fn titleText(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.title_text = c; return self; }
+    pub fn checkBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.check_bg = c; return self; }
+    pub fn checkMark(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.check_mark = c; return self; }
+    pub fn scrollbarBg(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.scrollbar_bg = c; return self; }
+    pub fn scrollbarThumb(self: *StyleBuilder, c: u32) *StyleBuilder { self.style.scrollbar_thumb = c; return self; }
+    pub fn rounding(self: *StyleBuilder, r: u8) *StyleBuilder { self.style.rounding = r; return self; }
+    pub fn windowRounding(self: *StyleBuilder, r: u8) *StyleBuilder { self.style.window_rounding = r; return self; }
+    pub fn shadow(self: *StyleBuilder, v: u8) *StyleBuilder { self.style.shadow = v; return self; }
+    pub fn spacing(self: *StyleBuilder, v: u8) *StyleBuilder { self.style.spacing = v; return self; }
+    pub fn padding(self: *StyleBuilder, v: u8) *StyleBuilder { self.style.padding = v; return self; }
+
+    pub fn build(self: *StyleBuilder) Style {
+        return self.style;
+    }
 };
 
 pub const style_dark = Style{
@@ -488,18 +534,18 @@ pub const style_nord_light = Style{
 };
 
 pub const style_modern_dark = Style{
-    .bg = 0xFF161820, .panel_bg = 0xFF222532,
-    .button_bg = 0xFF3A3E52, .button_hover = 0xFF484C66, .button_active = 0xFF3A76D2, .button_text = 0xFFE8EBF8,
-    .text = 0xFFE8EBF8, .text_dim = 0xFFAFB6D2,
-    .accent = 0xFF6EA5FF, .accent_hover = 0xFF5690EE,
-    .input_bg = 0xFF1C1E2A, .input_border = 0xFF3A3E52, .input_text = 0xFFE8EBF8,
-    .border = 0xFF363A4A,
-    .slider_track = 0xFF34384A, .slider_thumb = 0xFF468AF0,
-    .separator = 0xFF323648,
-    .header_bg = 0xFF243458, .header_text = 0xFFE8EBF8,
-    .title_bg = 0xFF1E2030, .title_text = 0xFFE8EBF8,
-    .check_bg = 0xFF2A2D3E, .check_mark = 0xFF50D282,
-    .scrollbar_bg = 0xFF282B3C, .scrollbar_thumb = 0xFF468AF0, .rounding = 6, .window_rounding = 10, .shadow = 24, .spacing = 6, .padding = 6,
+    .bg = 0xFF12141C, .panel_bg = 0xFF1A1D28,
+    .button_bg = 0xFF2D3148, .button_hover = 0xFF3E4360, .button_active = 0xFF4378E0, .button_text = 0xFFECF0FA,
+    .text = 0xFFECF0FA, .text_dim = 0xFF8F96B8,
+    .accent = 0xFF5B8DEF, .accent_hover = 0xFF7AA3F2,
+    .input_bg = 0xFF14161F, .input_border = 0xFF2D3148, .input_text = 0xFFECF0FA,
+    .border = 0xFF2A2E40,
+    .slider_track = 0xFF282C3E, .slider_thumb = 0xFF5B8DEF,
+    .separator = 0xFF262A3A,
+    .header_bg = 0xFF1A2140, .header_text = 0xFFECF0FA,
+    .title_bg = 0xFF181C2C, .title_text = 0xFFECF0FA,
+    .check_bg = 0xFF202336, .check_mark = 0xFF5BD88A,
+    .scrollbar_bg = 0xFF1E2232, .scrollbar_thumb = 0xFF5B8DEF, .rounding = 8, .window_rounding = 12, .shadow = 32, .spacing = 6, .padding = 6,
 };
 
 pub const style_modern_light = Style{
@@ -515,6 +561,21 @@ pub const style_modern_light = Style{
     .title_bg = 0xFFE8EBF2, .title_text = 0xFF1C2030,
     .check_bg = 0xFFFFFFFF, .check_mark = 0xFF269658,
     .scrollbar_bg = 0xFFE4E7EF, .scrollbar_thumb = 0xFF3A78D0, .rounding = 6, .window_rounding = 10, .shadow = 24, .spacing = 6, .padding = 6,
+};
+
+pub const style_diamond = Style{
+    .bg = 0xFF0B0D14, .panel_bg = 0xFF131620,
+    .button_bg = 0xFF22263A, .button_hover = 0xFF2E3350, .button_active = 0xFFAA56F0, .button_text = 0xFFEEF0FA,
+    .text = 0xFFEEF0FA, .text_dim = 0xFF7C84AA,
+    .accent = 0xFFAA56F0, .accent_hover = 0xFFC47AF2,
+    .input_bg = 0xFF0D0F18, .input_border = 0xFF22263A, .input_text = 0xFFEEF0FA,
+    .border = 0xFF1D2134,
+    .slider_track = 0xFF1D2134, .slider_thumb = 0xFFAA56F0,
+    .separator = 0xFF1A1E30,
+    .header_bg = 0xFF2A1440, .header_text = 0xFFEEF0FA,
+    .title_bg = 0xFF10141E, .title_text = 0xFFD4A0F8,
+    .check_bg = 0xFF181C2E, .check_mark = 0xFF56E0C4,
+    .scrollbar_bg = 0xFF161A28, .scrollbar_thumb = 0xFFAA56F0, .rounding = 8, .window_rounding = 12, .shadow = 40, .spacing = 8, .padding = 8,
 };
 
 pub const WidgetStateType = enum(u8) {
@@ -604,6 +665,7 @@ pub const InputState = struct {
 pub const Gui = struct {
     style: Style,
     fb: *gfx.Framebuffer,
+    canvas: gfx.Canvas,
     input: InputState,
 
     id_stack: [MAX_ID_STACK]u32,
@@ -626,11 +688,15 @@ pub const Gui = struct {
     next_id_counter: u32,
     frame_count: u64,
     clip_rect: gfx.Rect,
+    style_stack: [MAX_STYLE_STACK]Style,
+    style_depth: usize,
 
     pub fn init(fb: *gfx.Framebuffer) Gui {
+        const canvas = gfx.Canvas.init(fb);
         return Gui{
             .style = style_dark,
             .fb = fb,
+            .canvas = canvas,
             .input = InputState{
                 .mouse_x = 0, .mouse_y = 0,
                 .mouse_down = false, .mouse_clicked = false, .mouse_released = false,
@@ -669,6 +735,8 @@ pub const Gui = struct {
             .next_id_counter = 1,
             .frame_count = 0,
             .clip_rect = gfx.Rect{ .x = 0, .y = 0, .w = 0, .h = 0 },
+            .style_stack = [_]Style{undefined} ** MAX_STYLE_STACK,
+            .style_depth = 0,
         };
     }
 
@@ -676,8 +744,24 @@ pub const Gui = struct {
         self.style = s;
     }
 
+    pub fn beginCustomStyle(self: *Gui, s: Style) void {
+        if (self.style_depth < MAX_STYLE_STACK) {
+            self.style_stack[self.style_depth] = self.style;
+            self.style_depth += 1;
+        }
+        self.style = s;
+    }
+
+    pub fn endCustomStyle(self: *Gui) void {
+        if (self.style_depth > 0) {
+            self.style_depth -= 1;
+            self.style = self.style_stack[self.style_depth];
+        }
+    }
+
     pub fn beginFrame(self: *Gui, fb: *gfx.Framebuffer, input: InputState) void {
         self.fb = fb;
+        self.canvas.fb = fb;
         self.input = input;
         self.input.mouse_x = input.mouse_state.x;
         self.input.mouse_y = input.mouse_state.y;
@@ -693,18 +777,33 @@ pub const Gui = struct {
         self.layout_depth = 0;
         self.window_depth = 0;
         self.clip_rect = gfx.Rect{ .x = 0, .y = 0, .w = fb.width, .h = fb.height };
-        self.fb.fill(gfx.rgb(
-            @as(u8, @truncate((self.style.bg >> 16) & 0xFF)),
-            @as(u8, @truncate((self.style.bg >> 8) & 0xFF)),
-            @as(u8, @truncate(self.style.bg & 0xFF)),
-        ));
+        const bg_r = @as(u8, @truncate((self.style.bg >> 16) & 0xFF));
+        const bg_g = @as(u8, @truncate((self.style.bg >> 8) & 0xFF));
+        const bg_b = @as(u8, @truncate(self.style.bg & 0xFF));
+        self.fb.fill(gfx.rgb(bg_r, bg_g, bg_b));
+        if (self.canvas.xconn) |conn| {
+            conn.setFillColor(self.style.bg);
+            conn.fillRect(0, 0, @as(u16, @intCast(self.fb.width)), @as(u16, @intCast(self.fb.height)));
+        }
+        self.canvas.resetDirty();
+        current_canvas = &self.canvas;
     }
 
     pub fn endFrame(self: *Gui) void {
+        current_canvas = null;
         if (self.active_id != 0 and !self.input.mouse_down) {
             self.active_id = 0;
         }
         self.mouse_capture_id = self.input.mouse_state.capture_id;
+        self.canvas.clearClip();
+    }
+
+    pub fn beginClip(self: *Gui, x: i32, y: i32, w: u32, h: u32) void {
+        self.canvas.setClip(x, y, w, h);
+    }
+
+    pub fn endClip(self: *Gui) void {
+        self.canvas.clearClip();
     }
 
     fn nextId(self: *Gui) u32 {
@@ -777,31 +876,35 @@ pub const Gui = struct {
         }
 
         const active = self.isActive(id);
-        const bg = if (active) self.style.button_active
+        const raw_bg = if (active) self.style.button_active
             else if (hovered) self.style.button_hover
             else self.style.button_bg;
 
         const r = @min(self.style.rounding, @as(u8, @intCast(@min(area.w, area.h) / 2)));
+
         if (hovered or active) {
-            drawShadow(self.fb, area.x, area.y, area.w, area.h, self.style.shadow, r);
+            self.canvas.drawShadowSoft( area.x, area.y, area.w, area.h, self.style.shadow, r);
         }
-        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        self.canvas.fillRoundedRectGlow( area.x, area.y, area.w, area.h, r, raw_bg, if (hovered) @as(u8, 30) else 0);
+        self.canvas.fillRoundedRectGradV( area.x, area.y, area.w, area.h, r, lightenColor(raw_bg, 22), raw_bg);
         if (area.h > 6 and area.w > 6) {
-            const top_h = @max(@as(u32, 2), area.h / 2);
-            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, top_h, lightenColor(bg, if (hovered) 26 else 14));
-            fillRect(self.fb, area.x + 1, area.y + @as(i32, @intCast(area.h)) - 2, area.w - 2, 1, darkenColor(bg, 42));
+            self.canvas.fillRect( area.x + 2, area.y + 1, area.w - 4, 1, lightenColor(raw_bg, 36));
         }
         if (active and area.w > @as(u32, r) * 2 + 2) {
-            fillRect(self.fb, area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 2, self.style.accent);
+            self.canvas.fillRect( area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 3, lightenColor(self.style.accent, 20));
+        } else if (hovered and area.w > @as(u32, r) * 2 + 2) {
+            self.canvas.fillRect( area.x + @as(i32, r) + 6, area.y + @as(i32, @intCast(area.h)) - 2, area.w - @as(u32, r) * 2 - 12, 2, mixColor(self.style.accent, raw_bg, 120));
         }
-        const border = if (active) self.style.accent_hover else if (hovered) self.style.accent else self.style.border;
-        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, border);
-        drawInsetBorder(self.fb, area.x + 1, area.y + 1, area.w -| 2, area.h -| 2, lightenColor(bg, 18), darkenColor(bg, 36));
+        const border = if (active) lightenColor(self.style.accent, 30) else if (hovered) self.style.accent else self.style.border;
+        self.canvas.drawBorder( area.x, area.y, area.w, area.h, border);
+        if (active) {
+            self.canvas.drawInsetBorder( area.x + 1, area.y + 1, area.w -| 2, area.h -| 2, lightenColor(raw_bg, 14), darkenColor(raw_bg, 30));
+        }
         const tw = @as(i32, @intCast(label_text.len * 8));
-        drawTextAt(self.fb, label_text,
+        self.canvas.drawText( label_text,
             area.x + @divTrunc(@as(i32, @intCast(area.w)), 2) - @divTrunc(tw, 2),
             area.y + @divTrunc(@as(i32, @intCast(bh)), 2) - 4 + (if (active) @as(i32, 1) else @as(i32, 0)),
-            self.style.button_text, 8);
+            if (active) lightenColor(self.style.button_text, 20) else self.style.button_text, 8);
 
         return clicked;
     }
@@ -811,7 +914,7 @@ pub const Gui = struct {
         const th: u32 = 16;
         const tw = @as(u32, @intCast(text.len * 8));
         const area = self.allocSpace(tw + 4, th);
-        drawTextAt(self.fb, text, area.x + 2, area.y + 2, self.style.text, 8);
+        self.canvas.drawText( text, area.x + 2, area.y + 2, self.style.text, 8);
     }
 
     pub fn labelColored(self: *Gui, text: []const u8, color: u32) void {
@@ -819,7 +922,7 @@ pub const Gui = struct {
         const th: u32 = 16;
         const tw = @as(u32, @intCast(text.len * 8));
         const area = self.allocSpace(tw + 4, th);
-        drawTextAt(self.fb, text, area.x + 2, area.y + 2, color, 8);
+        self.canvas.drawText( text, area.x + 2, area.y + 2, color, 8);
     }
 
     pub fn textInput(self: *Gui, label_text: []const u8, buf: []u8) bool {
@@ -891,14 +994,14 @@ pub const Gui = struct {
         const bg = self.style.input_bg;
         const border = if (is_focused) self.style.accent else if (hovered) self.style.border else self.style.input_border;
         const r = @min(self.style.rounding, @as(u8, 4));
-        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        self.canvas.fillRoundedRect( area.x, area.y, area.w, area.h, r, bg);
         if (area.w > 6 and area.h > 6) {
-            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, 1, darkenColor(bg, 34));
-            fillRect(self.fb, area.x + 1, area.y + @as(i32, @intCast(area.h)) - 2, area.w - 2, 1, lightenColor(bg, 24));
+            self.canvas.fillRect( area.x + 1, area.y + 1, area.w - 2, 1, darkenColor(bg, 34));
+            self.canvas.fillRect( area.x + 1, area.y + @as(i32, @intCast(area.h)) - 2, area.w - 2, 1, lightenColor(bg, 24));
         }
-        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, border);
+        self.canvas.drawBorder( area.x, area.y, area.w, area.h, border);
         if (is_focused and area.w > 4 and area.h > 4) {
-            drawRectBorder(self.fb, area.x + 1, area.y + 1, area.w - 2, area.h - 2, mixColor(self.style.accent, bg, 95));
+            self.canvas.drawBorder( area.x + 1, area.y + 1, area.w - 2, area.h - 2, mixColor(self.style.accent, bg, 95));
         }
 
         var display_buf: [257]u8 = undefined;
@@ -911,11 +1014,11 @@ pub const Gui = struct {
 
         const txt_x = area.x + 4;
         const txt_y = area.y + 4;
-        drawTextAt(self.fb, display_buf[0..display_len], txt_x, txt_y, self.style.input_text, 8);
+        self.canvas.drawText( display_buf[0..display_len], txt_x, txt_y, self.style.input_text, 8);
 
         if (is_focused and (self.frame_count / 30) % 2 == 0) {
             const cx = txt_x + @as(i32, @intCast(state.text_cursor * 8));
-            fillRect(self.fb, cx, txt_y, 2, 16, self.style.accent);
+            self.canvas.fillRect( cx, txt_y, 2, 16, self.style.accent);
         }
 
         if (changed and buf.len >= state.text_len) {
@@ -947,24 +1050,125 @@ pub const Gui = struct {
 
         const bx = area.x;
         const by = area.y + 2;
-        const border = if (hovered) self.style.accent else self.style.border;
         const r = @min(self.style.rounding, @as(u8, 4));
-        const box_bg = if (checked.*) mixColor(self.style.check_bg, self.style.accent, 150)
-            else if (hovered) lightenColor(self.style.check_bg, 18)
+        const box_bg = if (checked.*) mixColor(self.style.check_bg, self.style.accent, 160)
+            else if (hovered) lightenColor(self.style.check_bg, 28)
             else self.style.check_bg;
-        fillRoundedRect(self.fb, bx, by, cw, ch, r, box_bg);
-        fillRect(self.fb, bx + 2, by + 2, cw - 4, 1, lightenColor(box_bg, 22));
-        drawRectBorder(self.fb, bx, by, cw, ch, border);
 
         if (checked.*) {
-            const mark = self.style.check_mark;
-            drawLineRaw(self.fb, bx + 5, by + 10, bx + 8, by + 13, mark);
-            drawLineRaw(self.fb, bx + 6, by + 10, bx + 9, by + 13, mark);
-            drawLineRaw(self.fb, bx + 8, by + 13, bx + 15, by + 5, mark);
-            drawLineRaw(self.fb, bx + 9, by + 13, bx + 16, by + 5, mark);
+            self.canvas.drawShadowSoft( bx, by, cw, ch, 8, r);
+        }
+        self.canvas.fillRoundedRect( bx, by, cw, ch, r, darkenColor(box_bg, 10));
+        self.canvas.fillRoundedRectGradV( bx, by, cw, ch, r, box_bg, darkenColor(box_bg, 10));
+        self.canvas.fillRect( bx + 2, by + 1, cw - 4, 1, lightenColor(box_bg, 30));
+        const border = if (checked.*) lightenColor(self.style.accent, 16) else if (hovered) self.style.accent else self.style.border;
+        self.canvas.drawBorder( bx, by, cw, ch, border);
+
+        if (checked.*) {
+            const mark = lightenColor(self.style.check_mark, 18);
+            self.canvas.drawLine( bx + 5, by + 10, bx + 8, by + 13, mark);
+            self.canvas.drawLine( bx + 6, by + 10, bx + 9, by + 13, mark);
+            self.canvas.drawLine( bx + 8, by + 13, bx + 15, by + 5, mark);
+            self.canvas.drawLine( bx + 9, by + 13, bx + 16, by + 5, mark);
         }
 
-        drawTextAt(self.fb, label_text, bx + @as(i32, @intCast(cw)) + 6, by + 1, if (hovered) self.style.text else self.style.text_dim, 8);
+        self.canvas.drawText( label_text, bx + @as(i32, @intCast(cw)) + 6, by + 1, if (hovered) self.style.text else self.style.text_dim, 8);
+    }
+
+    pub fn radioButton(self: *Gui, label_text: []const u8, group_value: u32, current: *u32) void {
+        const id = self.nextId();
+        const rh: u32 = 20;
+        const cw: u32 = 20;
+        const tw = @as(u32, @intCast(label_text.len * 8));
+        const area = self.allocSpace(cw + tw + 8, rh + 4);
+
+        const hovered = self.testHot(id, area.x, area.y, area.w, area.h);
+        const selected = current.* == group_value;
+
+        if (hovered and self.input.mouse_clicked) {
+            current.* = group_value;
+            self.active_id = id;
+        }
+        if (self.isActive(id) and self.input.mouse_released) {
+            self.active_id = 0;
+        }
+
+        const cx = area.x + 10;
+        const cy = area.y + 2 + 10;
+        const outer_r: i32 = 8;
+        const inner_r: i32 = 4;
+
+        const outer_color = if (hovered) self.style.accent else self.style.border;
+        const bg_color = if (hovered) lightenColor(self.style.check_bg, 18) else self.style.check_bg;
+        self.canvas.drawCircle( cx, cy, outer_r + 1, self.style.panel_bg);
+        self.canvas.drawCircle( cx, cy, outer_r, outer_color);
+        self.canvas.drawCircle( cx, cy, outer_r - 1, bg_color);
+        if (selected) {
+            self.canvas.drawCircle( cx, cy, inner_r, self.style.accent);
+            self.canvas.drawCircle( cx, cy, inner_r - 1, self.style.accent_hover);
+        }
+
+        self.canvas.drawText( label_text, area.x + @as(i32, @intCast(cw)) + 6, area.y + 2, if (hovered) self.style.text else self.style.text_dim, 8);
+    }
+
+    pub fn progressBar(self: *Gui, label_text: []const u8, value: f32) void {
+        _ = self.nextId();
+        const pb_h: u32 = 20;
+        const pb_w: u32 = @max(120, @as(u32, @intCast(self.fb.width - 40)));
+        const area = self.allocSpace(pb_w, pb_h + 16);
+
+        const v = @min(@as(f32, 1.0), @max(@as(f32, 0.0), value));
+        const fill_w: u32 = @intCast(@as(u32, @intFromFloat(@as(f64, v) * @as(f64, @floatFromInt(pb_w)))));
+        const r = @min(self.style.rounding, @as(u8, 4));
+
+        self.canvas.fillRoundedRect( area.x, area.y + 16, pb_w, pb_h, r, darkenColor(self.style.slider_track, 16));
+        if (pb_w > 4 and pb_h > 4) {
+            self.canvas.fillRect( area.x + 1, area.y + 17, pb_w - 2, 1, lightenColor(self.style.slider_track, 18));
+        }
+        if (fill_w > 0) {
+            self.canvas.fillRoundedRect( area.x, area.y + 16, fill_w, pb_h, r, self.style.accent);
+            if (fill_w > 4 and pb_h > 4) {
+                self.canvas.fillRect( area.x + 1, area.y + 17, fill_w - 2, 1, lightenColor(self.style.accent, 28));
+            }
+        }
+        self.canvas.drawBorder( area.x, area.y + 16, pb_w, pb_h, self.style.border);
+
+        var lbl_buf: [64]u8 = undefined;
+        var lbl_len: usize = 0;
+        if (label_text.len > 0) {
+            var li: usize = 0;
+            while (li < label_text.len and lbl_len < 58) : (li += 1) {
+                lbl_buf[lbl_len] = label_text[li];
+                lbl_len += 1;
+            }
+            lbl_buf[lbl_len] = ' ';
+            lbl_len += 1;
+        }
+        const pct = @as(u32, @intFromFloat(v * 100));
+        if (pct >= 100) { lbl_buf[lbl_len] = '1'; lbl_len += 1; lbl_buf[lbl_len] = '0'; lbl_len += 1; lbl_buf[lbl_len] = '0'; lbl_len += 1; }
+        else if (pct >= 10) { lbl_buf[lbl_len] = @as(u8, @intCast('0' + pct / 10)); lbl_len += 1; lbl_buf[lbl_len] = @as(u8, @intCast('0' + pct % 10)); lbl_len += 1; }
+        else { lbl_buf[lbl_len] = @as(u8, @intCast('0' + pct)); lbl_len += 1; }
+        lbl_buf[lbl_len] = '%';
+        lbl_len += 1;
+
+        self.canvas.drawText( lbl_buf[0..lbl_len], area.x, area.y + 2, self.style.text, 8);
+    }
+
+    pub fn tooltip(self: *Gui, text: []const u8) void {
+        const id = self.nextId();
+        if (self.isHot(id)) return;
+        const prev_hot = self.hot_id;
+        if (prev_hot == 0 or prev_hot == id) return;
+        const mx = self.input.mouse_x;
+        const my = self.input.mouse_y;
+        const tw = @as(u32, @intCast(text.len * 8 + 8));
+        const th: u32 = 18;
+        const tx = @min(mx + 8, @as(i32, @intCast(self.fb.width)) - @as(i32, @intCast(tw)) - 4);
+        const ty = @min(my - @as(i32, @intCast(th)) - 4, @as(i32, @intCast(self.fb.height)) - @as(i32, @intCast(th)) - 4);
+        self.canvas.drawShadow( tx, ty, tw, th, self.style.shadow, 3);
+        self.canvas.fillRoundedRect( tx, ty, tw, th, 3, darkenColor(self.style.panel_bg, 30));
+        self.canvas.drawBorder( tx, ty, tw, th, self.style.accent);
+        self.canvas.drawText( text, tx + 4, ty + 3, self.style.button_text, 8);
     }
 
     pub fn slider(self: *Gui, label_text: []const u8, value: *f32, min: f32, max: f32) bool {
@@ -1018,21 +1222,24 @@ pub const Gui = struct {
         const thumb_fill = if (is_active) self.style.accent_hover else self.style.slider_thumb;
         const tr = @min(self.style.rounding, @as(u8, 4));
 
-        fillRoundedRect(self.fb, track_x, track_y, track_w, track_h, tr, darkenColor(self.style.slider_track, 18));
-        fillRect(self.fb, track_x + 1, track_y + 1, track_w -| 2, 1, lightenColor(self.style.slider_track, 18));
+        self.canvas.drawShadowSoft( track_x - 1, track_y + 1, track_w + 2, track_h, 8, tr);
+        self.canvas.fillRoundedRect( track_x, track_y, track_w, track_h, tr, darkenColor(self.style.slider_track, 24));
+        self.canvas.fillRoundedRectGradV( track_x, track_y, track_w, track_h, tr, darkenColor(self.style.slider_track, 10), darkenColor(self.style.slider_track, 24));
 
         const fill_w: u32 = @intCast(@max(0, thumb_x - track_x));
         if (fill_w > 0) {
-            fillRoundedRect(self.fb, track_x, track_y, fill_w, track_h, tr, self.style.accent);
-            fillRect(self.fb, track_x + 1, track_y + 1, fill_w -| 2, 1, lightenColor(self.style.accent, 24));
+            self.canvas.fillRoundedRect( track_x, track_y, fill_w, track_h, tr, darkenColor(self.style.accent, 12));
+            self.canvas.fillRoundedRectGradV( track_x, track_y, fill_w, track_h, tr, lightenColor(self.style.accent, 18), darkenColor(self.style.accent, 12));
+            self.canvas.fillRect( track_x + 2, track_y + 1, fill_w -| 4, 1, lightenColor(self.style.accent, 32));
         }
 
         const hx = thumb_x - @divTrunc(@as(i32, @intCast(thumb_w)), 2);
         const hy = track_y - @divTrunc(@as(i32, @intCast(thumb_h - track_h)), 2);
-        drawShadow(self.fb, hx, hy, thumb_w, thumb_h, if (hovered or is_active) self.style.shadow else 10, tr + 2);
-        fillRoundedRect(self.fb, hx, hy, thumb_w, thumb_h, tr + 2, thumb_fill);
-        fillRect(self.fb, hx + 2, hy + 2, thumb_w - 4, 1, lightenColor(thumb_fill, 35));
-        drawRectBorder(self.fb, hx, hy, thumb_w, thumb_h, if (is_active) self.style.accent_hover else self.style.border);
+        self.canvas.drawShadowSoft( hx, hy, thumb_w, thumb_h, if (hovered or is_active) self.style.shadow else 12, tr + 2);
+        self.canvas.fillRoundedRect( hx, hy, thumb_w, thumb_h, tr + 2, darkenColor(thumb_fill, 12));
+        self.canvas.fillRoundedRectGradV( hx, hy, thumb_w, thumb_h, tr + 2, thumb_fill, darkenColor(thumb_fill, 12));
+        self.canvas.fillRect( hx + 2, hy + 2, thumb_w - 4, 1, lightenColor(thumb_fill, 40));
+        self.canvas.drawBorder( hx, hy, thumb_w, thumb_h, if (is_active) self.style.accent_hover else lightenColor(self.style.border, 8));
 
         var lbl_buf: [32]u8 = undefined;
         var lbl_len: usize = 0;
@@ -1071,7 +1278,7 @@ pub const Gui = struct {
             if (lbl_len < 30) { lbl_buf[lbl_len] = ch; lbl_len += 1; }
         }
 
-        drawTextAt(self.fb, lbl_buf[0..lbl_len], area.x, area.y + 2, if (hovered or is_active) self.style.text else self.style.text_dim, 8);
+        self.canvas.drawText( lbl_buf[0..lbl_len], area.x, area.y + 2, if (hovered or is_active) self.style.text else self.style.text_dim, 8);
         return changed;
     }
 
@@ -1097,16 +1304,16 @@ pub const Gui = struct {
 
         const bg = if (hovered) self.style.button_hover else self.style.header_bg;
         const r = @min(self.style.rounding, @as(u8, 4));
-        fillRoundedRect(self.fb, area.x, area.y, area.w, area.h, r, bg);
+        self.canvas.fillRoundedRect( area.x, area.y, area.w, area.h, r, bg);
         if (area.w > 8 and area.h > 8) {
-            fillRect(self.fb, area.x + 1, area.y + 1, area.w - 2, 1, lightenColor(bg, 22));
-            fillRect(self.fb, area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 2, if (open.*) self.style.accent else self.style.separator);
+            self.canvas.fillRect( area.x + 1, area.y + 1, area.w - 2, 1, lightenColor(bg, 22));
+            self.canvas.fillRect( area.x + @as(i32, r), area.y + @as(i32, @intCast(area.h)) - 3, area.w - @as(u32, r) * 2, 2, if (open.*) self.style.accent else self.style.separator);
         }
-        drawRectBorder(self.fb, area.x, area.y, area.w, area.h, if (hovered) self.style.accent else self.style.border);
+        self.canvas.drawBorder( area.x, area.y, area.w, area.h, if (hovered) self.style.accent else self.style.border);
 
         const arrow = if (open.*) "v" else ">";
-        drawTextAt(self.fb, arrow, area.x + 4, area.y + 4, self.style.header_text, 8);
-        drawTextAt(self.fb, label_text, area.x + 20, area.y + 4, self.style.header_text, 8);
+        self.canvas.drawText( arrow, area.x + 4, area.y + 4, self.style.header_text, 8);
+        self.canvas.drawText( label_text, area.x + 20, area.y + 4, self.style.header_text, 8);
 
         if (open.*) {
             const indent = self.style.button_bg;
@@ -1158,20 +1365,20 @@ pub const Gui = struct {
         }
 
         const box_bg = if (hovered or is_open) lightenColor(self.style.input_bg, 16) else self.style.input_bg;
-        fillRoundedRect(self.fb, area.x, area.y, total_w, bh, r, box_bg);
+        self.canvas.fillRoundedRect( area.x, area.y, total_w, bh, r, box_bg);
         if (total_w > 6 and bh > 6) {
-            fillRect(self.fb, area.x + 1, area.y + 1, total_w - 2, 1, lightenColor(box_bg, 24));
-            fillRect(self.fb, area.x + @as(i32, @intCast(total_w)) - 22, area.y + 1, 1, bh - 2, self.style.separator);
+            self.canvas.fillRect( area.x + 1, area.y + 1, total_w - 2, 1, lightenColor(box_bg, 24));
+            self.canvas.fillRect( area.x + @as(i32, @intCast(total_w)) - 22, area.y + 1, 1, bh - 2, self.style.separator);
         }
-        drawRectBorder(self.fb, area.x, area.y, total_w, bh, if (is_open) self.style.accent else if (hovered) self.style.border else self.style.input_border);
+        self.canvas.drawBorder( area.x, area.y, total_w, bh, if (is_open) self.style.accent else if (hovered) self.style.border else self.style.input_border);
         if (current.* < items.len) {
-            drawTextAt(self.fb, items[current.*], area.x + 6, area.y + 4, self.style.text, 8);
+            self.canvas.drawText( items[current.*], area.x + 6, area.y + 4, self.style.text, 8);
         }
-        drawTextAt(self.fb, if (is_open) "v" else ">", area.x + @as(i32, @intCast(total_w)) - 15, area.y + 4, if (is_open) self.style.accent else self.style.text_dim, 8);
+        self.canvas.drawText( if (is_open) "v" else ">", area.x + @as(i32, @intCast(total_w)) - 15, area.y + 4, if (is_open) self.style.accent else self.style.text_dim, 8);
 
         if (is_open) {
             const total_h = bh * @as(u32, @intCast(items.len));
-            drawShadow(self.fb, area.x, area.y + @as(i32, @intCast(bh)), total_w, total_h, self.style.shadow, r);
+            self.canvas.drawShadow( area.x, area.y + @as(i32, @intCast(bh)), total_w, total_h, self.style.shadow, r);
             var ci: usize = 0;
             while (ci < items.len) : (ci += 1) {
                 const iy = area.y + @as(i32, @intCast(bh)) + @as(i32, @intCast(ci * bh));
@@ -1179,14 +1386,14 @@ pub const Gui = struct {
                 const item_hover = self.input.mouse_x >= area.x and self.input.mouse_x < area.x + @as(i32, @intCast(total_w)) and
                     self.input.mouse_y >= iy and self.input.mouse_y < iy + @as(i32, @intCast(bh));
                 const ibg = if (isel) self.style.accent else if (item_hover) self.style.button_hover else self.style.panel_bg;
-                fillRoundedRect(self.fb, area.x, iy, total_w, bh, 0, ibg);
+                self.canvas.fillRoundedRect( area.x, iy, total_w, bh, 0, ibg);
                 if (isel) {
-                    fillRect(self.fb, area.x, iy, 3, bh, self.style.accent_hover);
+                    self.canvas.fillRect( area.x, iy, 3, bh, self.style.accent_hover);
                 }
-                drawRectBorder(self.fb, area.x, iy, total_w, bh, self.style.border);
-                drawTextAt(self.fb, items[ci], area.x + 6, iy + 4, if (isel) self.style.button_text else self.style.text, 8);
+                self.canvas.drawBorder( area.x, iy, total_w, bh, self.style.border);
+                self.canvas.drawText( items[ci], area.x + 6, iy + 4, if (isel) self.style.button_text else self.style.text, 8);
             }
-            drawRectBorder(self.fb, area.x, area.y + bh, total_w, total_h, self.style.border);
+            self.canvas.drawBorder( area.x, area.y + bh, total_w, total_h, self.style.border);
         }
 
         if (!is_open and state.bool_val) {
@@ -1202,7 +1409,7 @@ pub const Gui = struct {
         const area = self.allocSpace(10, 6);
         const cy = area.y + 2;
         const cw = if (self.layout_depth > 0) self.layout_stack[self.layout_depth - 1].w else @as(u32, @intCast(self.fb.width));
-        fillRoundedRect(self.fb, area.x, cy, cw, 2, 1, self.style.separator);
+        self.canvas.fillRoundedRect( area.x, cy, cw, 2, 1, self.style.separator);
     }
 
     pub fn sameLine(self: *Gui, spacing: i32) void {
@@ -1268,6 +1475,79 @@ pub const Gui = struct {
         }
     }
 
+    pub fn beginScrollable(self: *Gui, id_base: u32, vw: u32, vh: u32) void {
+        const state = self.getOrCreateState(id_base, .none);
+        const pos = self.getContentRegion();
+        const sx = pos.x;
+        const sy = pos.y;
+
+        if (state.float_val == 0 and state.t == .none) {
+            state.float_val = 0;
+        }
+        var scroll_y = @as(i32, @intFromFloat(state.float_val));
+
+        const hover_scroll = self.testHot(id_base, sx, sy, vw, vh);
+        if (hover_scroll and self.input.scroll != 0) {
+            scroll_y -= self.input.scroll * 30;
+        }
+        const max_scroll: i32 = @max(0, state.aux_x - @as(i32, @intCast(vh)));
+        if (max_scroll > 0) {
+            scroll_y = @max(0, @min(scroll_y, max_scroll));
+        } else {
+            scroll_y = 0;
+        }
+        state.float_val = @as(f32, @floatFromInt(scroll_y));
+
+        _ = self.allocSpace(vw, vh);
+
+        self.canvas.setClip(sx, sy, vw, vh);
+
+        if (self.layout_depth < MAX_LAYOUT_STACK) {
+            self.layout_stack[self.layout_depth] = LayoutFrame{
+                .x = sx, .y = sy - scroll_y, .w = vw, .h = vh,
+                .cursor_x = sx, .cursor_y = sy - scroll_y,
+                .max_x = sx, .max_y = sy - scroll_y,
+                .mode = .vertical, .spacing = @as(i32, self.style.spacing), .indent = 0,
+            };
+            self.layout_depth += 1;
+        }
+    }
+
+    pub fn endScrollable(self: *Gui, id_base: u32, vh: u32) void {
+        var content_h: u32 = vh;
+        if (self.layout_depth > 0) {
+            self.layout_depth -= 1;
+            const l = self.layout_stack[self.layout_depth];
+            content_h = @max(vh, @as(u32, @intCast(@max(0, l.max_y - l.y))));
+        }
+
+        const state = self.getOrCreateState(id_base, .none);
+        state.aux_x = @as(i32, @intCast(content_h));
+
+        const pos = self.getContentRegion();
+        const sy = pos.y;
+
+        if (content_h > vh) {
+            const scroll_y = @as(i32, @intFromFloat(state.float_val));
+            const bar_h: u32 = @max(16, vh * vh / content_h);
+            const denom = @as(i32, @intCast(content_h - vh));
+            const bar_y: i32 = if (denom > 0)
+                sy + @divTrunc(@as(i32, @intCast((vh - bar_h))) * scroll_y, denom)
+            else
+                sy;
+
+            const bx = if (self.layout_depth > 0) self.layout_stack[self.layout_depth - 1].cursor_x else @as(i32, 0);
+            const abs_bx = @max(bx, @as(i32, @intCast(self.fb.width)) - 14);
+            self.canvas.fillRoundedRect( abs_bx, sy, 10, vh, 4, darkenColor(self.style.scrollbar_bg, 14));
+            self.canvas.fillRoundedRect( abs_bx + 2, bar_y + 2, 6, bar_h -| 4, 3, self.style.scrollbar_thumb);
+            if (bar_h > 6) {
+                self.canvas.fillRect( abs_bx + 3, bar_y + 3, 4, 1, lightenColor(self.style.scrollbar_thumb, 30));
+            }
+        }
+
+        self.canvas.clearClip();
+    }
+
     pub fn beginWindow(self: *Gui, title: []const u8, x: i32, y: i32, w: u32, h: u32, resizable: bool) bool {
         const id = self.nextId();
         const title_h: i32 = 28;
@@ -1330,23 +1610,43 @@ pub const Gui = struct {
         }
 
         const wr = self.style.window_rounding;
-        drawShadow(self.fb, win_x, win_y, win_w, win_h, self.style.shadow, wr);
-        fillRoundedRect(self.fb, win_x, win_y, win_w, win_h, wr, self.style.panel_bg);
-        fillRoundedRect(self.fb, win_x, win_y, win_w, @as(u32, @intCast(title_h)), wr, self.style.title_bg);
+        self.canvas.drawShadowSoft( win_x, win_y, win_w, win_h, self.style.shadow, wr);
+        self.canvas.fillRoundedRect( win_x, win_y, win_w, win_h, wr, self.style.panel_bg);
+        const title_bot = lightenColor(self.style.title_bg, 12);
+        self.canvas.fillRoundedRectGradV( win_x, win_y, win_w, @as(u32, @intCast(title_h)), wr, lightenColor(self.style.title_bg, 30), title_bot);
         if (win_w > 8) {
-            fillRect(self.fb, win_x + @as(i32, wr), win_y + 1, win_w - @as(u32, wr) * 2, 1, lightenColor(self.style.title_bg, 24));
-            fillRect(self.fb, win_x + @as(i32, wr), win_y + @as(i32, @intCast(title_h)) - 3, win_w - @as(u32, wr) * 2, 2, self.style.accent);
+            self.canvas.fillRect( win_x + @as(i32, wr) + 2, win_y + 1, win_w - @as(u32, wr) * 2 - 4, 1, lightenColor(self.style.title_bg, 40));
+            self.canvas.fillRect( win_x + @as(i32, wr), win_y + @as(i32, @intCast(title_h)) - 3, win_w - @as(u32, wr) * 2, 2, lightenColor(self.style.accent, 20));
         }
-        drawTextAt(self.fb, title, win_x + 10, win_y + 7, self.style.title_text, 8);
+        self.canvas.drawText( title, win_x + 10, win_y + 7, lightenColor(self.style.title_text, 20), 8);
+
+        const close_id = id + 0x3000;
+        const close_sz: i32 = 22;
+        const close_x = win_x + @as(i32, @intCast(win_w)) - close_sz - 5;
+        const close_y = win_y + 3;
+        const hover_close = self.testHot(close_id, close_x, close_y, @as(u32, @intCast(close_sz)), @as(u32, @intCast(close_sz)));
+        if (hover_close) {
+            self.canvas.fillRoundedRect( close_x, close_y, @as(u32, @intCast(close_sz)), @as(u32, @intCast(close_sz)), 4, 0x44FF4444);
+        }
+        const close_color = if (hover_close) 0xFFEE6666 else self.style.title_text;
+        self.canvas.drawLine( close_x + 6, close_y + 6, close_x + close_sz - 6, close_y + close_sz - 6, close_color);
+        self.canvas.drawLine( close_x + close_sz - 6, close_y + 6, close_x + 6, close_y + close_sz - 6, close_color);
+        if (hover_close and self.input.mouse_clicked) {
+            self.active_id = close_id;
+        }
+        if (self.isActive(close_id) and self.input.mouse_released) {
+            if (hover_close) return false;
+            self.active_id = 0;
+        }
 
         const client_y = win_y + title_h;
         const client_h = win_h - @as(u32, @intCast(title_h));
         if (client_h > 4 and win_w > 4) {
-            fillRect(self.fb, win_x + 1, client_y, win_w - 2, 1, darkenColor(self.style.panel_bg, 18));
-            fillRect(self.fb, win_x + 1, win_y + @as(i32, @intCast(win_h)) - 2, win_w - 2, 1, lightenColor(self.style.panel_bg, 12));
+            self.canvas.fillRect( win_x + 1, client_y, win_w - 2, 1, darkenColor(self.style.panel_bg, 18));
+            self.canvas.fillRect( win_x + 1, win_y + @as(i32, @intCast(win_h)) - 2, win_w - 2, 1, lightenColor(self.style.panel_bg, 12));
         }
-        drawRectBorder(self.fb, win_x, win_y, win_w, win_h, self.style.border);
-        drawInsetBorder(self.fb, win_x + 1, win_y + 1, win_w -| 2, win_h -| 2, lightenColor(self.style.panel_bg, 14), darkenColor(self.style.panel_bg, 34));
+        self.canvas.drawBorder( win_x, win_y, win_w, win_h, lightenColor(self.style.border, 12));
+        self.canvas.drawInsetBorder( win_x + 1, win_y + 1, win_w -| 2, win_h -| 2, lightenColor(self.style.panel_bg, 18), darkenColor(self.style.panel_bg, 38));
 
         if (resizable) {
             const resize_id = id + 0x2000;
@@ -1374,9 +1674,11 @@ pub const Gui = struct {
                     self.mouse_capture_id = 0;
                 }
             }
-            drawLineRaw(self.fb, win_x + @as(i32, @intCast(win_w)) - 11, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 11, self.style.text_dim);
-            drawLineRaw(self.fb, win_x + @as(i32, @intCast(win_w)) - 8, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 8, self.style.text_dim);
+            self.canvas.drawLine( win_x + @as(i32, @intCast(win_w)) - 11, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 11, self.style.text_dim);
+            self.canvas.drawLine( win_x + @as(i32, @intCast(win_w)) - 8, win_y + @as(i32, @intCast(win_h)) - 4, win_x + @as(i32, @intCast(win_w)) - 4, win_y + @as(i32, @intCast(win_h)) - 8, self.style.text_dim);
         }
+
+        self.canvas.setClip(win_x + 1, client_y, win_w -| 2, client_h -| 1);
 
         if (self.layout_depth < MAX_LAYOUT_STACK) {
             self.layout_stack[self.layout_depth] = LayoutFrame{
@@ -1395,6 +1697,100 @@ pub const Gui = struct {
         if (self.layout_depth > 0) {
             self.layout_depth -= 1;
         }
+        self.canvas.clearClip();
+    }
+
+    pub fn listBox(self: *Gui, label_text: []const u8, items: []const []const u8, current: *usize, visible_rows: usize) bool {
+        const id = self.nextId();
+        const state = self.getOrCreateState(id, .none);
+
+        const lh: u32 = 22;
+        const rows = @max(1, visible_rows);
+        var max_w: u32 = 80;
+        var mi: usize = 0;
+        while (mi < items.len) : (mi += 1) {
+            const iw = @as(u32, @intCast(items[mi].len * 8 + 16));
+            if (iw > max_w) max_w = iw;
+        }
+        if (max_w < 120) max_w = 120;
+
+        const total_h = lh * @as(u32, @intCast(items.len));
+        const view_h = lh * @as(u32, @intCast(rows));
+        const area = self.allocSpace(max_w, view_h + 16);
+
+        if (label_text.len > 0) {
+            self.canvas.drawText( label_text, area.x, area.y + 1, self.style.text, 8);
+        }
+        const lx = area.x;
+        const ly = area.y + 16;
+        const lw = max_w;
+        const lvh = @min(total_h, view_h);
+
+        if (state.float_val == 0 and state.t == .none) {
+            state.float_val = 0;
+        }
+        var scroll_off = @as(i32, @intFromFloat(state.float_val));
+
+        const hover_list = self.testHot(id, lx, ly, lw, lvh);
+        if (hover_list and self.input.scroll != 0) {
+            scroll_off -= self.input.scroll * 20;
+        }
+        const max_s = @max(0, @as(i32, @intCast(total_h - lvh)));
+        if (max_s > 0) {
+            scroll_off = @max(0, @min(scroll_off, max_s));
+        } else {
+            scroll_off = 0;
+        }
+        state.float_val = @as(f32, @floatFromInt(scroll_off));
+
+        self.canvas.fillRoundedRect( lx, ly, lw, lvh, @min(self.style.rounding, @as(u8, 3)), self.style.panel_bg);
+        self.canvas.drawBorder( lx, ly, lw, lvh, self.style.border);
+
+        self.canvas.setClip(lx + 1, ly + 1, lw -| 2, lvh -| 2);
+
+        var changed = false;
+        var ci: usize = 0;
+        while (ci < items.len) : (ci += 1) {
+            const iy = ly + @as(i32, @intCast(ci * lh)) - scroll_off;
+            const ie = iy + @as(i32, @intCast(lh));
+            if (ie < ly) continue;
+            if (iy > ly + @as(i32, @intCast(lvh))) break;
+
+            const i_hover = self.input.mouse_x >= lx and self.input.mouse_x < lx + @as(i32, @intCast(lw)) and
+                self.input.mouse_y >= iy and self.input.mouse_y < ie;
+            const isel = ci == current.*;
+
+            if (isel) {
+                self.canvas.fillRect( lx + 1, iy, lw - 2, lh, mixColor(self.style.panel_bg, self.style.accent, 90));
+                self.canvas.fillRect( lx + 1, iy, 3, lh, self.style.accent_hover);
+            } else if (i_hover) {
+                self.canvas.fillRect( lx + 1, iy, lw - 2, lh, self.style.button_hover);
+            }
+
+            self.canvas.drawText( items[ci], lx + 6, iy + 5, if (isel) self.style.button_text else self.style.text, 8);
+
+            if (i_hover and self.input.mouse_clicked) {
+                current.* = ci;
+                changed = true;
+                self.active_id = id;
+            }
+        }
+
+        self.canvas.clearClip();
+
+        if (total_h > lvh) {
+            const bar_h: u32 = @max(14, lvh * lvh / total_h);
+            const denom = @as(i32, @intCast(total_h - lvh));
+            const bar_y: i32 = if (denom > 0)
+                ly + @divTrunc(@as(i32, @intCast((lvh - bar_h))) * scroll_off, denom)
+            else
+                ly;
+            const bx = lx + @as(i32, @intCast(lw)) - 10;
+            self.canvas.fillRoundedRect( bx, ly, 8, lvh, 4, darkenColor(self.style.scrollbar_bg, 14));
+            self.canvas.fillRoundedRect( bx + 1, bar_y + 1, 6, bar_h -| 2, 3, self.style.scrollbar_thumb);
+        }
+
+        return changed;
     }
 
     fn allocSpace(self: *Gui, w: u32, h: u32) gfx.Rect {
@@ -1430,19 +1826,8 @@ pub const Gui = struct {
     }
 };
 
-fn colorR(c: u32) u8 { return @as(u8, @intCast((c >> 16) & 0xFF)); }
-fn colorG(c: u32) u8 { return @as(u8, @intCast((c >> 8) & 0xFF)); }
-fn colorB(c: u32) u8 { return @as(u8, @intCast(c & 0xFF)); }
-fn colorA(c: u32) u8 { return @as(u8, @intCast((c >> 24) & 0xFF)); }
-
 pub fn mixColor(a: u32, b: u32, amount_b: u8) u32 {
-    const ia = @as(u32, 255 - amount_b);
-    const ib = @as(u32, amount_b);
-    const r = (@as(u32, colorR(a)) * ia + @as(u32, colorR(b)) * ib) / 255;
-    const g = (@as(u32, colorG(a)) * ia + @as(u32, colorG(b)) * ib) / 255;
-    const bl = (@as(u32, colorB(a)) * ia + @as(u32, colorB(b)) * ib) / 255;
-    const al = (@as(u32, colorA(a)) * ia + @as(u32, colorA(b)) * ib) / 255;
-    return (al << 24) | (r << 16) | (g << 8) | bl;
+    return gfx.mixU32(a, b, amount_b);
 }
 
 pub fn lightenColor(c: u32, amount: u8) u32 {
@@ -1453,149 +1838,60 @@ pub fn darkenColor(c: u32, amount: u8) u32 {
     return mixColor(c, 0xFF000000, amount);
 }
 
-fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) void {
-    if (w == 0 or h == 0) return;
-    const x1: u32 = if (x < 0) 0 else @intCast(x);
-    const y1: u32 = if (y < 0) 0 else @intCast(y);
-    const raw_x2 = x + @as(i32, @intCast(w));
-    const raw_y2 = y + @as(i32, @intCast(h));
-    if (raw_x2 <= 0 or raw_y2 <= 0) return;
-    const x2: u32 = @min(@as(u32, @intCast(raw_x2)), fb.width);
-    const y2: u32 = @min(@as(u32, @intCast(raw_y2)), fb.height);
-    if (x2 <= x1 or y2 <= y1) return;
-    var yi = y1;
-    while (yi < y2) : (yi += 1) {
-        const row = @as(usize, yi) * fb.stride;
-        var xi = x1;
-        while (xi < x2) : (xi += 1) {
-            fb.pixels[row + xi] = color;
-        }
-    }
-}
-
 pub fn fillRoundedRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, r: u8, color: u32) void {
-    if (r == 0 or w < @as(u32, @intCast(r * 2 + 2)) or h < @as(u32, @intCast(r * 2 + 2))) {
-        fillRect(fb, x, y, w, h, color);
-        return;
-    }
-    const rr = @as(u32, r);
-    const x1: u32 = if (x < 0) 0 else @intCast(x);
-    const y1: u32 = if (y < 0) 0 else @intCast(y);
-    const x2_: u32 = @min(x1 + w, fb.width);
-    const y2_: u32 = @min(y1 + h, fb.height);
-    var yi = y1;
-    while (yi < y2_) : (yi += 1) {
-        const row = @as(usize, yi) * fb.stride;
-        const local_y = yi - y1;
-        var xi = x1;
-        while (xi < x2_) : (xi += 1) {
-            const local_x = xi - x1;
-            var in_corner = false;
-            if (local_x < rr and local_y < rr) {
-                const dx = rr - local_x - 1;
-                const dy = rr - local_y - 1;
-                if (dx * dx + dy * dy > rr * rr) in_corner = true;
-            } else if (local_x >= w - rr and local_y < rr) {
-                const dx = local_x - (w - rr) + 1;
-                const dy = rr - local_y - 1;
-                if (dx * dx + dy * dy > rr * rr) in_corner = true;
-            } else if (local_x < rr and local_y >= h - rr) {
-                const dx = rr - local_x - 1;
-                const dy = local_y - (h - rr) + 1;
-                if (dx * dx + dy * dy > rr * rr) in_corner = true;
-            } else if (local_x >= w - rr and local_y >= h - rr) {
-                const dx = local_x - (w - rr) + 1;
-                const dy = local_y - (h - rr) + 1;
-                if (dx * dx + dy * dy > rr * rr) in_corner = true;
-            }
-            if (!in_corner) {
-                fb.pixels[row + xi] = color;
-            }
-        }
-    }
+    fb.fillRoundRect4(x, y, w, h, r, gfx.rgba(
+        @as(u8, @intCast((color >> 16) & 0xFF)),
+        @as(u8, @intCast((color >> 8) & 0xFF)),
+        @as(u8, @intCast(color & 0xFF)),
+        @as(u8, @intCast((color >> 24) & 0xFF)),
+    ));
+    if (current_canvas) |c| c.markDirty(x, y, w, h);
 }
 
 pub fn drawShadow(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, intensity: u8, r: u8) void {
-    if (intensity == 0) return;
-    const steps = @as(u32, @min(@as(u32, intensity) / 20 + 1, 4));
-    var s: u32 = 1;
-    while (s <= steps) : (s += 1) {
-        const alpha = intensity / (s * 2 + 1);
-        if (alpha < 5) continue;
-        const shadow_color: u32 = 0xFF000000 | (@as(u32, alpha) << 16) | (@as(u32, alpha) << 8) | @as(u32, alpha);
-        const off = @as(i32, @intCast(s));
-        const sr = if (r > s) r - @as(u8, @intCast(s)) else 0;
-        fillRoundedRect(fb, x + off, y + off, w, h, sr, shadow_color);
+    if (intensity < 10) return;
+    const a1 = intensity / 3;
+    const a2 = intensity / 5;
+    const a3 = intensity / 9;
+    const c1: u32 = 0xFF000000 | (@as(u32, a1) << 16) | (@as(u32, a1) << 8) | @as(u32, a1);
+    const c2: u32 = 0xFF000000 | (@as(u32, a2) << 16) | (@as(u32, a2) << 8) | @as(u32, a2);
+    const c3: u32 = 0xFF000000 | (@as(u32, a3) << 16) | (@as(u32, a3) << 8) | @as(u32, a3);
+    const sr1 = if (r > 2) r - 2 else 0;
+    const sr2 = if (r > 3) r - 3 else 0;
+    fillRoundedRect(fb, x + 1, y + 2, w, h, sr2, c3);
+    fillRoundedRect(fb, x + 2, y + 2, w, h, sr1, c2);
+    fillRoundedRect(fb, x + 3, y + 3, w, h, @as(u8, @intCast(@max(0, @as(i32, r) - 1))), c1);
+    if (current_canvas) |c| c.markDirty(x, y, w + 3, h + 3);
+}
+
+pub fn drawTriangleFilled(fb: *gfx.Framebuffer, x1: i32, y1: i32, x2: i32, y2: i32, x3: i32, y3: i32, color: u32) void {
+    fb.drawTriangleFilled(x1, y1, x2, y2, x3, y3, gfx.rgba(
+        @as(u8, @intCast((color >> 16) & 0xFF)),
+        @as(u8, @intCast((color >> 8) & 0xFF)),
+        @as(u8, @intCast(color & 0xFF)),
+        @as(u8, @intCast((color >> 24) & 0xFF)),
+    ));
+    if (current_canvas) |c| {
+        const min_x = @min(x1, @min(x2, x3));
+        const min_y = @min(y1, @min(y2, y3));
+        const max_x = @max(x1, @max(x2, x3));
+        const max_y = @max(y1, @max(y2, y3));
+        c.markDirty(min_x, min_y, @as(u32, @intCast(@max(0, max_x - min_x))), @as(u32, @intCast(@max(0, max_y - min_y))));
     }
 }
 
-fn drawRectBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) void {
-    if (w < 2 or h < 2) {
-        fillRect(fb, x, y, w, h, color);
-        return;
-    }
-    fillRect(fb, x, y, w, 1, color);
-    fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, color);
-    fillRect(fb, x, y, 1, h, color);
-    fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, color);
-}
-
-fn drawInsetBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, light: u32, dark: u32) void {
-    if (w < 2 or h < 2) return;
-    fillRect(fb, x, y, w, 1, light);
-    fillRect(fb, x, y, 1, h, light);
-    fillRect(fb, x, y + @as(i32, @intCast(h)) - 1, w, 1, dark);
-    fillRect(fb, x + @as(i32, @intCast(w)) - 1, y, 1, h, dark);
-}
-
-fn drawLineRaw(fb: *gfx.Framebuffer, x1: i32, y1: i32, x2: i32, y2: i32, color: u32) void {
-    const dx: i32 = if (x2 >= x1) x2 - x1 else x1 - x2;
-    const dy_abs: i32 = if (y2 >= y1) y2 - y1 else y1 - y2;
-    const dy: i32 = -dy_abs;
-    const sx: i32 = if (x1 < x2) 1 else -1;
-    const sy: i32 = if (y1 < y2) 1 else -1;
-    var err = dx + dy;
-    var cx = x1;
-    var cy = y1;
-    while (true) {
-        if (cx >= 0 and cy >= 0 and cx < @as(i32, @intCast(fb.width)) and cy < @as(i32, @intCast(fb.height))) {
-            fb.pixels[@as(usize, @intCast(cy)) * fb.stride + @as(usize, @intCast(cx))] = color;
-        }
-        if (cx == x2 and cy == y2) break;
-        const e2 = 2 * err;
-        if (e2 >= dy) { err += dy; cx += sx; }
-        if (e2 <= dx) { err += dx; cy += sy; }
-    }
-}
-
-fn drawTextAt(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, size: u32) void {
-    const scale = if (size >= 8) @as(u32, @intCast(@divFloor(size, 8))) else 1;
-    var cx = x;
-    var cy = y;
-    for (text) |ch| {
-        if (ch == '\n') { cy += @as(i32, @intCast(scale * 8 + 2)); cx = x; continue; }
-        const glyph = gfx.getGlyph(ch);
-        var gy: u32 = 0;
-        while (gy < 8) : (gy += 1) {
-            var gx: u32 = 0;
-            while (gx < 8) : (gx += 1) {
-                if ((glyph[gy] & (@as(u8, 1) << @intCast(7 - gx))) != 0) {
-                    const bx = cx + @as(i32, @intCast(gx * scale));
-                    const by = cy + @as(i32, @intCast(gy * scale));
-                    var sy: u32 = 0;
-                    while (sy < scale) : (sy += 1) {
-                        var sx: u32 = 0;
-                        while (sx < scale) : (sx += 1) {
-                            const px = bx + @as(i32, @intCast(sx));
-                            const py = by + @as(i32, @intCast(sy));
-                            if (px >= 0 and py >= 0 and px < @as(i32, @intCast(fb.width)) and py < @as(i32, @intCast(fb.height))) {
-                                fb.pixels[@as(usize, @intCast(py)) * fb.stride + @as(usize, @intCast(px))] = color;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        cx += @as(i32, @intCast(scale * 8 + 2));
+pub fn drawQuadBezier(fb: *gfx.Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, x2: i32, y2: i32, color: u32, steps: u32) void {
+    fb.drawQuadBezier(x0, y0, x1, y1, x2, y2, gfx.rgba(
+        @as(u8, @intCast((color >> 16) & 0xFF)),
+        @as(u8, @intCast((color >> 8) & 0xFF)),
+        @as(u8, @intCast(color & 0xFF)),
+        @as(u8, @intCast((color >> 24) & 0xFF)),
+    ), steps);
+    if (current_canvas) |c| {
+        const min_x = @min(x0, @min(x1, x2));
+        const min_y = @min(y0, @min(y1, y2));
+        const max_x = @max(x0, @max(x1, x2));
+        const max_y = @max(y0, @max(y1, y2));
+        c.markDirty(min_x, min_y, @as(u32, @intCast(@max(0, max_x - min_x))), @as(u32, @intCast(@max(0, max_y - min_y))));
     }
 }

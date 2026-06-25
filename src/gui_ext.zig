@@ -500,18 +500,27 @@ pub fn initProgressBar() ProgressBar {
 }
 
 fn fillRect(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) void {
-    const x1: u32 = if (x < 0) 0 else @intCast(x);
-    const y1: u32 = if (y < 0) 0 else @intCast(y);
-    const x2: u32 = @min(x1 + w, fb.width);
-    const y2: u32 = @min(y1 + h, fb.height);
+    if (w == 0 or h == 0) return;
+    var x1: i32 = @max(0, x);
+    var y1: i32 = @max(0, y);
+    var x2: i32 = @min(@as(i32, @intCast(fb.width)), x + @as(i32, @intCast(w)));
+    var y2: i32 = @min(@as(i32, @intCast(fb.height)), y + @as(i32, @intCast(h)));
+    if (fb.clip_active) {
+        x1 = @max(x1, fb.clip_x);
+        y1 = @max(y1, fb.clip_y);
+        x2 = @min(x2, fb.clip_x + @as(i32, @intCast(fb.clip_w)));
+        y2 = @min(y2, fb.clip_y + @as(i32, @intCast(fb.clip_h)));
+    }
+    if (x2 <= x1 or y2 <= y1) return;
     var yi = y1;
     while (yi < y2) : (yi += 1) {
-        const row = @as(usize, yi) * fb.stride;
+        const row = @as(usize, @intCast(yi)) * fb.stride;
         var xi = x1;
         while (xi < x2) : (xi += 1) {
-            fb.pixels[row + xi] = color;
+            fb.pixels[row + @as(usize, @intCast(xi))] = color;
         }
     }
+    if (gui.current_canvas) |c| c.markDirty(x1, y1, @as(u32, @intCast(x2 - x1)), @as(u32, @intCast(y2 - y1)));
 }
 
 fn drawRectBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, color: u32) void {
@@ -532,6 +541,10 @@ fn drawInsetBorder(fb: *gfx.Framebuffer, x: i32, y: i32, w: u32, h: u32, light: 
 
 fn drawText(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, size: u32) void {
     const scale = if (size >= 8) @as(u32, @intCast(@divFloor(size, 8))) else 1;
+    const clip_l = if (fb.clip_active) fb.clip_x else @as(i32, 0);
+    const clip_t = if (fb.clip_active) fb.clip_y else @as(i32, 0);
+    const clip_r = if (fb.clip_active) fb.clip_x + @as(i32, @intCast(fb.clip_w)) else @as(i32, @intCast(fb.width));
+    const clip_b = if (fb.clip_active) fb.clip_y + @as(i32, @intCast(fb.clip_h)) else @as(i32, @intCast(fb.height));
     var cx = x;
     var cy = y;
     for (text) |ch| {
@@ -550,7 +563,8 @@ fn drawText(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, 
                         while (sx < scale) : (sx += 1) {
                             const px = bx + @as(i32, @intCast(sx));
                             const py = by + @as(i32, @intCast(sy));
-                            if (px >= 0 and py >= 0 and px < @as(i32, @intCast(fb.width)) and py < @as(i32, @intCast(fb.height))) {
+                            if (px >= clip_l and py >= clip_t and px < clip_r and py < clip_b and
+                                px < @as(i32, @intCast(fb.width)) and py < @as(i32, @intCast(fb.height))) {
                                 fb.pixels[@as(usize, @intCast(py)) * fb.stride + @as(usize, @intCast(px))] = color;
                             }
                         }
@@ -559,6 +573,11 @@ fn drawText(fb: *gfx.Framebuffer, text: []const u8, x: i32, y: i32, color: u32, 
             }
         }
         cx += @as(i32, @intCast(scale * 8 + 2));
+    }
+    if (gui.current_canvas) |c| {
+        const tw = @as(i32, @intCast(text.len * scale * 8 + (text.len - 1) * 2));
+        const th = @as(i32, @intCast(scale * 8));
+        c.markDirty(x, y, @as(u32, @intCast(@max(0, tw))), @as(u32, @intCast(@max(0, th))));
     }
 }
 

@@ -846,6 +846,12 @@ struct Point { x: int, y: int }
 | `httppost(host, path, body)` | алиас для http.post |
 | `resolve(host)` | x86: pipe+fork→exec http_client resolve; ARM64: inline UDP DNS |
 | `resolve_hostname(host)` | алиас для resolve |
+| `tls.get(host, path)` | TLS/HTTPS GET builtin |
+| `tls_get(host, path)` | алиас для tls.get |
+| `tlsget(host, path)` | алиас для tls.get |
+| `tls.post(host, path, body)` | TLS/HTTPS POST builtin |
+| `tls_post(host, path, body)` | алиас для tls.post |
+| `tlspost(host, path, body)` | алиас для tls.post |
 | `https.get(host, path)` | pipe+fork→exec /bin/sh -c "curl -s URL" (требуется curl) |
 | `https_get(host, path)` | алиас для https.get |
 | `httpsget(host, path)` | алиас для https.get |
@@ -887,7 +893,11 @@ struct Point { x: int, y: int }
 | `guiApp()` / `guiapp()` | Запустить gui_srv |
 | `guiServer()` / `guiserver()` | Обработка событий GUI |
 | `guiCmd(fd, type, id, x, y, w, h, val, label)` | Низкоуровневая команда |
-| `setTheme(fd, theme_id)` | Сменить тему |
+| `setTheme(fd, theme_id)` | Сменить тему (0=Dark, 1=Light, 2=Modern Dark, 3=Modern Light, 4=Diamond) |
+| `setStyle(fd, field_id, value)` | Установить поле стиля (0-29: цвета/rounding/shadow/spacing/padding) |
+| `guiTriangle(x1,y1,x2,y2,x3,y3)` | Закрашенный треугольник |
+| `guiGlassPanel(x,y,w,h,bg,border)` | Стеклянная панель |
+| `guiShadow(x,y,w,h,intensity)` | Мягкая тень |
 
 **Android:**
 

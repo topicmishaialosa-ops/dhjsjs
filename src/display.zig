@@ -60,6 +60,16 @@ pub const DisplayBackend = struct {
         }
     }
 
+    pub fn presentCanvas(self: *DisplayBackend, canvas: *gfx.Canvas) void {
+        if (self.mode == 1) {
+            if (canvas.xconn == null) canvas.setNative(&self.xconn);
+            canvas.flush();
+        } else {
+            self.present();
+            canvas.resetDirty();
+        }
+    }
+
     pub fn pollEvent(self: *DisplayBackend) ?Event {
         if (self.mode == 1) {
             var pfd: [1]sys.PollFd = undefined;
@@ -96,6 +106,11 @@ pub const DisplayBackend = struct {
         } else if (self.mode == 20) {
             return self.w32.pollEvent();
         }
+        return null;
+    }
+
+    pub fn getX11Conn(self: *DisplayBackend) ?*x11_mod.X11Conn {
+        if (self.mode == 1) return &self.xconn;
         return null;
     }
 

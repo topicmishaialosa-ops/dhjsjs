@@ -538,6 +538,8 @@ dhjsjs_cc build hello.dhjs -o hello --release  # режим релиза
 | `resolve_hostname(hostname)` | Алиас для resolve |
 | `http.get(host, path)` | HTTP GET запрос |
 | `http.post(host, path, body)` | HTTP POST запрос |
+| `tls.get(host, path)` | TLS/HTTPS GET запрос |
+| `tls.post(host, path, body)` | TLS/HTTPS POST запрос |
 | `https.get(host, path)` | HTTPS GET запрос (через curl) |
 | `https.post(host, path, body)` | HTTPS POST запрос (через curl) |
 | `pipe(fds)` | Создать канал (pipe) |
@@ -652,18 +654,18 @@ fn main() {
 
 ```
 fn main() {
-    hui response = https.get("google.com", "/")
+    hui response = tls.get("google.com", "/")
     print(response)
 }
 ```
 
-**Важно:** `https.get` использует fork+exec `/bin/sh -c "curl -s URL"`. На системе должен быть установлен `curl`.
+`tls.get(host, path)` вызывается прямо из dhjsjs-кода как языковой builtin. Старые имена `https.get`, `https_get` и `httpsget` сохранены как совместимые алиасы.
 
 ### HTTPS POST запрос
 
 ```
 fn main() {
-    hui response = https.post("example.com", "/api", "data=hello&key=123")
+    hui response = tls.post("example.com", "/api", "data=hello&key=123")
     print(response)
 }
 ```
@@ -695,12 +697,17 @@ fn main() {
 
 GUI в dhjsjs работает через отдельный процесс `gui_srv`, который рисует окна и виджеты.
 
-### Новые возможности GUI
+### Возможности GUI
 
-- **Современные темы**: Доступны пресеты `style_modern_dark` и `style_modern_light` для современного вида интерфейса
-- **Карточки**: Функция `drawCard()` позволяет создавать панельки с закруглёнными углами и тенью, подобно материальному дизайну
-- **Смена темы во время выполнения**: Встроенная функция `setTheme(fd, theme_id)` позволяет менять тему интерфейса 'на лету'
-- **Полная мышь**: Внутренняя библиотека `mouse.zig` нормализует левую/среднюю/правую/X-кнопки, вертикальный и горизонтальный scroll, click/release, double-click, drag и capture для виджетов.
+- **Красивый рендеринг**: Кнопки, слайдеры, чекбоксы рисуются с градиентами, мягкими тенями и свечением — без единой внешней библиотеки
+- **Кастомный шрифт**: Собственный 8x8 битмап-шрифт, переработанный для лучшей читаемости
+- **Темы**: 5 встроенных пресетов (Dark, Light, Modern Dark, Modern Light, Diamond) + полная кастомизация через `setStyle(fd, field_id, value)`
+- **Смена темы во время выполнения**: `setTheme(fd, theme_id)` меняет тему 'на лету'
+- **Стилизация по полям**: `setStyle(fd, 0, 0xFF112233)` — изменить фон, accent, скругление, тень и любое другое поле стиля
+- **StyleBuilder (Zig)**: Цепочечный API `StyleBuilder.init(base).bg(0xFF).accent(0xFF).rounding(12).build()` для создания своих стилей в коде
+- **Glass Panel**: Полупрозрачные панели `guiGlassPanel(x, y, w, h, bg, border)` со стеклянным эффектом
+- **Примитивы**: Треугольники `guiTriangle(x1,y1,x2,y2,x3,y3)`, мягкие тени `guiShadow(x,y,w,h,intensity)`
+- **Полная мышь**: `mouse.zig` обрабатывает левую/среднюю/правую/X-кнопки, scroll, click/release, double-click, drag и capture
 
 ### Простое окно с кнопкой
 
@@ -741,7 +748,12 @@ fn main() {
 | `separator()` | Разделитель |
 | `sameLine(spacing)` | Следующий виджет в той же строке |
 | `addSpace(w, h)` | Пустое место |
-> **Примечание:** Также доступна функция `drawCard()` для создания панелек с закруглёнными углами и тенью, а также пресеты современных тем `style_modern_dark` и `style_modern_light`.
+| `setTheme(fd, theme_id)` | Установить тему (0-4: Dark, Light, Modern Dark, Modern Light, Diamond) |
+| `setStyle(fd, field_id, value)` | Изменить любое поле стиля по ID (0-29) |
+| `guiTriangle(x1,y1,x2,y2,x3,y3)` | Закрашенный треугольник |
+| `guiGlassPanel(x,y,w,h,bg,border)` | Полупрозрачная стеклянная панель |
+| `guiShadow(x,y,w,h,intensity)` | Нарисовать мягкую тень |
+> **Темы:** Light (0), Modern Light (1), Dark (2), Modern Dark (3), Diamond (4). Все стили можно кастомизировать через `setStyle()`.
 
 ### Мышь в GUI
 
@@ -1660,6 +1672,12 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `http.post(host, path, body)` | POST (x86: fork+exec http_client, ARM64: inline socket+DNS) |
 | `http_post(host, path, body)` | alias |
 | `httppost(host, path, body)` | alias |
+| `tls.get(host, path)` | TLS/HTTPS GET |
+| `tls_get(host, path)` | alias |
+| `tlsget(host, path)` | alias |
+| `tls.post(host, path, body)` | TLS/HTTPS POST |
+| `tls_post(host, path, body)` | alias |
+| `tlspost(host, path, body)` | alias |
 | `https.get(host, path)` | HTTPS GET (fork+exec curl -s URL) |
 | `https_get(host, path)` | alias |
 | `httpsget(host, path)` | alias |
@@ -1884,9 +1902,27 @@ fn main() int {
 fn main() int {
     hui fd = guiServer();
     setTheme(fd, 3); // modern_light
+    // темы: 0=Dark, 1=Light, 2=Modern Dark, 3=Modern Light, 4=Diamond
     return 0;
 }
 ```
+
+### Кастомный стиль
+
+`setStyle(fd, field_id, value)` меняет любое поле стиля по ID:
+
+```
+fn main() {
+    hui fd = guiServer()
+    setTheme(fd, 4)     // Diamond — база
+    setStyle(fd, 5, 0x00FF88)  // accent — зелёный
+    setStyle(fd, 25, 16)       // rounding — сильнее скругление
+    setStyle(fd, 27, 40)       // shadow — глубже тень
+    // ... виджеты будут с новым стилем
+}
+```
+
+**ID полей:** 0-24 цвета (bg, panel_bg, button_bg, text, accent, border...), 25=rounding, 26=window_rounding, 27=shadow, 28=spacing, 29=padding
 
 ### Запустить плеер
 

@@ -71,7 +71,71 @@ fn formatTime(seconds: f32, buf: []u8) usize {
     return len;
 }
 
+fn zEq(ptr: [*]const u8, lit: []const u8) bool {
+    var i: usize = 0;
+    while (i < lit.len) : (i += 1) {
+        if (ptr[i] != lit[i]) return false;
+    }
+    return ptr[lit.len] == 0;
+}
+
+fn readCmdArgs(args_buf: *[8][MAX_PATH_LEN]u8) usize {
+    var cmdline: [4096]u8 = undefined;
+    var cl_len: usize = 0;
+    const fd = sys.open("/proc/self/cmdline\x00", 0, 0);
+    if (fd >= 0) {
+        const n = sys.read(fd, &cmdline, cmdline.len);
+        sys.close(fd);
+        if (n > 0) cl_len = @as(usize, @intCast(n));
+    }
+    var arg_count: usize = 0;
+    var ci: usize = 0;
+    while (ci < cl_len and arg_count < args_buf.len) {
+        const start = ci;
+        while (ci < cl_len and cmdline[ci] != 0) ci += 1;
+        if (ci > start) {
+            const copy_len = @min(ci - start, MAX_PATH_LEN - 1);
+            @memcpy(args_buf[arg_count][0..copy_len], cmdline[start..][0..copy_len]);
+            args_buf[arg_count][copy_len] = 0;
+            arg_count += 1;
+        }
+        ci += 1;
+    }
+    return arg_count;
+}
+
+fn playSingleFile(path: [*]const u8) void {
+    var player = player_mod.Player.init();
+    defer player.unload();
+
+    if (!player.loadFile(path)) {
+        _ = sys.write(2, "media_player: cannot load file\n", 30);
+        sys.exit(1);
+    }
+    if (!player.play()) {
+        _ = sys.write(2, "media_player: cannot open audio output\n", 39);
+        sys.exit(1);
+    }
+    while (player.state == .playing) {
+        if (!player.update()) break;
+    }
+    sys.exit(0);
+}
+
 pub fn main() void {
+    var args_buf: [8][MAX_PATH_LEN]u8 = undefined;
+    const arg_count = readCmdArgs(&args_buf);
+    if (arg_count >= 2 and zEq(@as([*]const u8, @ptrCast(&args_buf[0])), "media_player")) {
+        playSingleFile(@as([*]const u8, @ptrCast(&args_buf[1])));
+    }
+    if (arg_count >= 4 and zEq(@as([*]const u8, @ptrCast(&args_buf[1])), "--runtime") and
+        (zEq(@as([*]const u8, @ptrCast(&args_buf[2])), "media-player") or
+            zEq(@as([*]const u8, @ptrCast(&args_buf[2])), "media_player") or
+            zEq(@as([*]const u8, @ptrCast(&args_buf[2])), "media")))
+    {
+        playSingleFile(@as([*]const u8, @ptrCast(&args_buf[3])));
+    }
+
     var fb = gfx.Framebuffer.init(W, H) orelse {
         _ = sys.write(2, "Failed to allocate framebuffer\n", 31);
         sys.exit(1);

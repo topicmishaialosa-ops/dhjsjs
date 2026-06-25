@@ -12,6 +12,10 @@ const errors_mod = @import("errors.zig");
 const esp = @import("esp.zig");
 const axml = @import("axml.zig");
 const zip = @import("zip.zig");
+const media_player = @import("media_player.zig");
+const gui_srv = @import("gui_srv.zig");
+const http_client = @import("http_client.zig");
+const tls_client = @import("tls_client.zig");
 
 const Target = enum { x86_64, aarch64, riscv32, apk, raw, native, windows };
 
@@ -432,6 +436,7 @@ fn cmdHelp() void {
         \\  dhjsjs_cc new <project>
         \\  dhjsjs_cc flash [file] --target esp32 [--port /dev/ttyUSB0]
         \\  dhjsjs_cc transpile [file] [-o output]
+        \\  dhjsjs_cc --runtime <media-player|gui-srv|http-client|tls-client> ...
         \\
         \\Targets:
         \\  x86_64   - Linux x86_64
@@ -454,6 +459,52 @@ fn cmdHelp() void {
         \\  --no-sign              skip APK signing
         ;
     sys.writeStr(1, help.ptr, help.len);
+}
+
+fn cmdRuntime(args: []const []const u8) void {
+    if (args.len < 3) {
+        sys.writeStr(2, "error: runtime name required\n", 29);
+        sys.exit(1);
+    }
+    const name = args[2];
+    if (strEql(name, "media-player") or strEql(name, "media_player") or strEql(name, "media")) {
+        media_player.main();
+        return;
+    }
+    if (strEql(name, "gui-srv") or strEql(name, "gui_srv") or strEql(name, "gui")) {
+        gui_srv.main();
+        return;
+    }
+    if (strEql(name, "http-client") or strEql(name, "http_client") or strEql(name, "http")) {
+        http_client.main();
+        return;
+    }
+    if (strEql(name, "tls-client") or strEql(name, "tls_client") or strEql(name, "tls")) {
+        tls_client.main();
+        return;
+    }
+    sys.writeStr(2, "error: unknown runtime\n", 23);
+    sys.exit(1);
+}
+
+fn dispatchHelperArgv0(name: []const u8) bool {
+    if (strEql(name, "media_player")) {
+        media_player.main();
+        return true;
+    }
+    if (strEql(name, "gui_srv")) {
+        gui_srv.main();
+        return true;
+    }
+    if (strEql(name, "http_client")) {
+        http_client.main();
+        return true;
+    }
+    if (strEql(name, "tls_client")) {
+        tls_client.main();
+        return true;
+    }
+    return false;
 }
 
 fn cmdTranspile(args: []const []const u8) void {
@@ -662,6 +713,7 @@ pub fn main() void {
             }
         }
     }
+    if (ai >= 1 and dispatchHelperArgv0(args[0])) return;
     if (ai < 2) { cmdHelp(); sys.exit(0); }
     const cmd = args[1];
     var matched = false;
@@ -670,6 +722,7 @@ pub fn main() void {
     if (strEql(cmd, "new")) { cmdNew(args[0..ai]); matched = true; }
     if (strEql(cmd, "flash")) { cmdFlash(args[0..ai]); matched = true; }
     if (strEql(cmd, "transpile")) { cmdTranspile(args[0..ai]); matched = true; }
+    if (strEql(cmd, "--runtime")) { cmdRuntime(args[0..ai]); matched = true; }
     if (strEql(cmd, "--help") or strEql(cmd, "-h")) { cmdHelp(); matched = true; }
     if (!matched) { sys.writeStr(2, "error: unknown command\n", 23); sys.exit(1); }
 }

@@ -1521,7 +1521,7 @@ fn compileCall(n: *const parser_mod.AstNode, pool: *[parser_mod.MAX_NODES]parser
       if (eq(name, "setTheme")) {
           // setTheme(fd, theme_id) -> sends CMD_SET_THEME to gui_srv
           // fd: file descriptor to write to (gui_srv write end from guiServer)
-          // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light
+          // theme_id: 0=dark, 1=light, 2=modern_dark, 3=modern_light, 4=diamond
           var args_list: [2]parser_mod.NodeIdx = .{parser_mod.NO_NODE} ** 2;
           var arg_i: usize = 0;
           var ch = n.first_child;

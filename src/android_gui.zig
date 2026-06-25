@@ -181,38 +181,42 @@ fn renderFrame(window: *anyopaque) void {
     cmd_ptr.should_finish = if (should_finish) 1 else 0;
     cmd_ptr.has_focus = if (has_focus) 1 else 0;
 
-     // Store touch info from latest event (backward compatibility)
-     if (ctx.touch_count > 0) {
-         cmd_ptr.touch_x = ctx.touch_events[0].x;
-         cmd_ptr.touch_y = ctx.touch_events[0].y;
-         cmd_ptr.touch_down = if (ctx.touch_events[0].action == 0) 1 else 0;
-         cmd_ptr.touch_action = ctx.touch_events[0].action;
-         cmd_ptr.touch_pointer_id = ctx.touch_events[0].pointer_id;
-     } else {
-         cmd_ptr.touch_down = 0;
-     }
-     // Store multi-touch data
-     cmd_ptr.touch_count = ctx.touch_count;
-     var i: usize = 0;
-     while (i < ctx.touch_count) : (i += 1) {
-         cmd_ptr.touch_x_arr[i] = ctx.touch_events[i].x;
-         cmd_ptr.touch_y_arr[i] = ctx.touch_events[i].y;
-         cmd_ptr.touch_down_arr[i] = if (ctx.touch_events[i].action == 0) 1 else 0;
-         cmd_ptr.touch_id_arr[i] = ctx.touch_events[i].pointer_id;
-     }
-     // Rising-edge click detection
-     cmd_ptr.clicked = 0;
-     if (cmd_ptr.touch_down == 1 and prev_touch_down == 0) {
-         cmd_ptr.clicked = 1;
-         cmd_ptr.click_x = if (ctx.touch_count > 0) ctx.touch_events[0].x else 0;
-         cmd_ptr.click_y = if (ctx.touch_count > 0) ctx.touch_events[0].y else 0;
-     }
-     prev_touch_down = cmd_ptr.touch_down;
-     ctx.touch_count = 0;
-     ctx.key_count = 0;
+      // Store touch info from latest event (backward compatibility)
+      if (ctx.touch_count > 0) {
+          cmd_ptr.touch_x = @as(i32, @intFromFloat(ctx.touch_events[0].x));
+          cmd_ptr.touch_y = @as(i32, @intFromFloat(ctx.touch_events[0].y));
+          cmd_ptr.touch_down = if (ctx.touch_events[0].action == 0) 1 else 0;
+          cmd_ptr.touch_action = ctx.touch_events[0].action;
+          cmd_ptr.touch_pointer_id = ctx.touch_events[0].pointer_id;
+      } else {
+          cmd_ptr.touch_down = 0;
+      }
+      // Store multi-touch data
+      cmd_ptr.touch_count = ctx.touch_count;
+      var i: usize = 0;
+      while (i < ctx.touch_count) : (i += 1) {
+          cmd_ptr.touch_x_arr[i] = @as(i32, @intFromFloat(ctx.touch_events[i].x));
+          cmd_ptr.touch_y_arr[i] = @as(i32, @intFromFloat(ctx.touch_events[i].y));
+          cmd_ptr.touch_down_arr[i] = if (ctx.touch_events[i].action == 0) 1 else 0;
+          cmd_ptr.touch_action_arr[i] = ctx.touch_events[i].action;
+          cmd_ptr.touch_id_arr[i] = ctx.touch_events[i].pointer_id;
+      }
+      // Rising-edge click detection
+      cmd_ptr.clicked = 0;
+      if (cmd_ptr.touch_down == 1 and prev_touch_down == 0) {
+          cmd_ptr.clicked = 1;
+          cmd_ptr.click_x = if (ctx.touch_count > 0) @as(i32, @intFromFloat(ctx.touch_events[0].x)) else 0;
+          cmd_ptr.click_y = if (ctx.touch_count > 0) @as(i32, @intFromFloat(ctx.touch_events[0].y)) else 0;
+      }
+      prev_touch_down = cmd_ptr.touch_down;
+      // Reset event cursor for gui_poll_event
+      cmd_ptr.cur_ev_type = 0;
+      cmd_ptr.event_cursor = 0;
+      ctx.touch_count = 0;
+      ctx.key_count = 0;
 
-     // Call user code (dhjsjs compiled)
-    main();
+      // Call user code (dhjsjs compiled)
+     main();
 
     _ = system.ANativeWindow_unlockAndPost(window);
     ctx.frame_count += 1;

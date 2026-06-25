@@ -2877,12 +2877,15 @@ fn main() {
 
 ---
 
-### 19.38.5 https.get — HTTPS GET запрос
+### 19.38.5 tls.get / https.get — TLS/HTTPS GET запрос
 
-**Назначение:** Выполнить HTTPS GET запрос к серверу (через curl).
+**Назначение:** Выполнить TLS/HTTPS GET запрос к серверу из dhjsjs-кода.
 
 **Синтаксис:**
 ```
+tls.get(host, path)
+tls_get(host, path)
+tlsget(host, path)
 https.get(host, path)
 https_get(host, path)
 httpsget(host, path)
@@ -2895,29 +2898,29 @@ httpsget(host, path)
 **Возвращаемое значение:** строка с ответом сервера
 
 **Описание:**
-1. Создаёт pipe
-2. Создаёт дочерний процесс через fork
-3. Дочерний процесс запускает `/bin/sh -c "curl -s https://host/path"`
-4. Родитель читает ответ из pipe
-5. Требуется установленный `curl` на целевой системе
-6. Буфер ответа живёт до следующего похожего вызова
+1. `tls.get` распознаётся компилятором как builtin-вызов языка
+2. `https.get`, `https_get` и `httpsget` сохранены как совместимые алиасы
+3. Буфер ответа живёт до следующего похожего вызова
 
 **Примеры:**
 ```
 fn main() {
-    hui response = https.get("example.com", "/")
+    hui response = tls.get("example.com", "/")
     print(response)
 }
 ```
 
 ---
 
-### 19.38.6 https.post — HTTPS POST запрос
+### 19.38.6 tls.post / https.post — TLS/HTTPS POST запрос
 
-**Назначение:** Выполнить HTTPS POST запрос с телом (через curl).
+**Назначение:** Выполнить TLS/HTTPS POST запрос с телом из dhjsjs-кода.
 
 **Синтаксис:**
 ```
+tls.post(host, path, body)
+tls_post(host, path, body)
+tlspost(host, path, body)
 https.post(host, path, body)
 https_post(host, path, body)
 httpspost(host, path, body)
@@ -2933,7 +2936,7 @@ httpspost(host, path, body)
 **Примеры:**
 ```
 fn main() {
-    hui response = https.post("api.example.com", "/data", "key=value")
+    hui response = tls.post("api.example.com", "/data", "key=value")
     print(response)
 }
 ```
@@ -3243,8 +3246,9 @@ setTheme(fd, theme_id)
 |----|----------|
 | 0 | dark |
 | 1 | light |
-| 2 | modern_dark |
-| 3 | modern_light |
+| 2 | modern_dark (алиас Dark) |
+| 3 | modern_light (алиас Light) |
+| 4 | diamond |
 
 **Примеры:**
 ```
@@ -3267,7 +3271,99 @@ fn main() {
 
 ---
 
-### 19.52 Framebuffer — fb_open / fb_close
+### 19.52 GUI — setStyle
+
+**Назначение:** Изменить любое поле стиля во время выполнения.
+
+**Синтаксис:**
+```
+setStyle(fd, field_id, value)
+```
+
+**Аргументы:**
+- `fd` — pipe дескриптор от guiApp
+- `field_id` — ID поля стиля (0-29)
+- `value` — значение (u32, цвета в 0xRRGGBB)
+
+**ID полей:**
+| ID | Поле | Назначение |
+|----|------|------------|
+| 0 | bg | Фон окна |
+| 1 | panel_bg | Фон панели |
+| 2 | button_bg | Фон кнопки |
+| 3 | button_hover | Кнопка при наведении |
+| 4 | text | Основной текст |
+| 5 | accent | Акцентный цвет |
+| 6 | border | Цвет рамки |
+| 7 | check_mark | Цвет галочки |
+| 8-24 | ... | Другие цвета |
+| 25 | rounding | Скругление углов |
+| 26 | window_rounding | Скругление окна |
+| 27 | shadow | Интенсивность тени |
+| 28 | spacing | Расстояние между виджетами |
+| 29 | padding | Отступ внутри виджетов |
+
+**Пример:**
+```
+fn main() {
+    hui gui_fd = guiApp()
+    setStyle(gui_fd, 5, 0xFF6600)  // оранжевый accent
+    setStyle(gui_fd, 25, 12)       // сильное скругление
+}
+```
+
+---
+
+### 19.53 GUI — guiTriangle
+
+**Назначение:** Нарисовать закрашенный треугольник.
+
+**Синтаксис:**
+```
+guiTriangle(x1, y1, x2, y2, x3, y3)
+```
+
+**Пример:**
+```
+fn main() {
+    hui gui_fd = guiApp()
+    guiTriangle(100, 100, 200, 100, 150, 50)
+}
+```
+
+---
+
+### 19.54 GUI — guiGlassPanel
+
+**Назначение:** Нарисовать полупрозрачную стеклянную панель.
+
+**Синтаксис:**
+```
+guiGlassPanel(x, y, w, h, bg, border)
+```
+
+**Пример:**
+```
+fn main() {
+    hui gui_fd = guiApp()
+    guiGlassPanel(50, 50, 300, 200, 0x1A1D28, 0x363A4A)
+}
+```
+
+---
+
+### 19.55 GUI — guiShadow
+
+**Назначение:** Нарисовать мягкую многослойную тень.
+
+**Синтаксис:**
+```
+guiShadow(x, y, w, h, intensity)
+```
+
+---
+
+### 19.56 Framebuffer — fb_open / fb_close
 
 **Назначение:** Открыть/закрыть framebuffer для рисования на экране.
 

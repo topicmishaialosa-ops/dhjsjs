@@ -1,4 +1,4 @@
-all: dhjsjs dhjsjs_cc media_player desktop_gui gui_srv http_client
+all: dhjsjs dhjsjs_cc media_player desktop_gui gui_srv http_client tls_client
 
 dhjsjs: src/*.zig
 	zig build-exe src/main.zig --name dhjsjs --cache-dir .zig-cache
@@ -18,6 +18,9 @@ gui_srv: src/*.zig
 http_client: src/*.zig
 	zig build-exe src/http_client.zig --name http_client --cache-dir .zig-cache
 
+tls_client: src/*.zig
+	zig build-exe src/tls_client.zig --name tls_client --cache-dir .zig-cache
+
 release: src/*.zig
 	zig build-exe src/main.zig --name dhjsjs --cache-dir .zig-cache -Doptimize=ReleaseSafe
 	strip dhjsjs
@@ -31,6 +34,8 @@ release: src/*.zig
 	strip gui_srv
 	zig build-exe src/http_client.zig --name http_client --cache-dir .zig-cache -Doptimize=ReleaseSafe
 	strip http_client
+	zig build-exe src/tls_client.zig --name tls_client --cache-dir .zig-cache -Doptimize=ReleaseSafe
+	strip tls_client
 
 run: dhjsjs
 	./dhjsjs
@@ -45,6 +50,6 @@ run-gui: gui_srv
 	./gui_srv
 
 clean:
-	rm -rf dhjsjs dhjsjs_cc media_player desktop_gui gui_srv http_client .zig-cache zig-out output
+	rm -rf dhjsjs dhjsjs_cc media_player desktop_gui gui_srv http_client tls_client .zig-cache zig-out output
 
 .PHONY: all release run run-player clean

@@ -158,18 +158,34 @@ pub fn main() void {
             _ = gui.textInput("Input", text_buf[0..]);
         }
 
-        gui.separator();
-        const combo_items = [_][]const u8{ "Option A", "Option B", "Option C", "Option D" };
-        if (gui.comboBox("Combo", combo_items[0..], &combo_idx)) {
-            var buf2: [64]u8 = undefined;
-            var len2: usize = 0;
-            const sel = "Selected: ";
-            for (sel) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
-            for (combo_items[combo_idx]) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
-            gui.label(buf2[0..len2]);
-        }
+    gui.separator();
+    const combo_items = [_][]const u8{ "Option A", "Option B", "Option C", "Option D" };
+    if (gui.comboBox("Combo", combo_items[0..], &combo_idx)) {
+        var buf2: [64]u8 = undefined;
+        var len2: usize = 0;
+        const sel = "Selected: ";
+        for (sel) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
+        for (combo_items[combo_idx]) |c| { if (len2 < 60) { buf2[len2] = c; len2 += 1; } }
+        gui.label(buf2[0..len2]);
+    }
 
-        gui.endWindow();
+    gui.separator();
+    gui.label("Radio buttons:");
+    var radio_val: u32 = 0;
+    gui.radioButton("Option 1", 0, &radio_val);
+    gui.radioButton("Option 2", 1, &radio_val);
+    gui.radioButton("Option 3", 2, &radio_val);
+
+    gui.separator();
+    gui.label("Progress:");
+    gui.progressBar("CPU", @as(f32, @floatFromInt(combo_idx)) / 3.0);
+
+    gui.separator();
+    gui.label("Scrollable list:");
+    const list_data = [_][]const u8{ "Item A", "Item B", "Item C", "Item D", "Item E", "Item F", "Item G" };
+    _ = gui.listBox("", list_data[0..], &combo_idx, 4);
+
+    gui.endWindow();
 
         _ = gui.beginWindow("Style Switcher", 380, 10, 410, 540, true);
         gui.label("Pick a theme:");
