@@ -155,20 +155,29 @@ pub const X11Conn = struct {
     depth: u8,
     wid: u32,
     gc: u32,
+    w_orig: u16,
+    h_orig: u16,
+    fullscreen: bool,
+    net_wm_state_atom: u32,
+    fullscreen_atom: u32,
+    f11_keycode: u8,
+    min_keycode: u8,
+    max_keycode: u8,
 
     pub fn createWindow(self: *X11Conn, x: i16, y: i16, w: u16, h: u16) void {
-        var buf: [40]u8 = undefined;
+        self.w_orig = w;
+        self.h_orig = h;
+        var buf: [36]u8 = undefined;
         buf[0] = 1; buf[1] = 0;
-        write16(&buf, 2, 10);
+        write16(&buf, 2, 9);
         write32(&buf, 4, self.wid);
         write32(&buf, 8, self.root);
         write16(&buf, 12, @as(u16, @bitCast(x))); write16(&buf, 14, @as(u16, @bitCast(y)));
         write16(&buf, 16, w); write16(&buf, 18, h);
         write16(&buf, 20, 0); write16(&buf, 22, 1);
         buf[24] = 0; buf[25] = 0; buf[26] = 0; buf[27] = 0;
-        write32(&buf, 28, 2 | 2048);
+        write32(&buf, 28, 2); // value-mask: CWBackPixel only
         write32(&buf, 32, self.black_pixel);
-        write32(&buf, 36, 0x28003);
         writeAll(self.fd, &buf);
     }
 
@@ -239,6 +248,73 @@ pub const X11Conn = struct {
             if (utf8_str != 0) self.changeProp(net_wm_name, utf8_str, 8, title);
         }
     }
+
+    pub fn setupFullscreenAtoms(self: *X11Conn) void {
+        self.net_wm_state_atom = self.internAtom("_NET_WM_STATE");
+        self.fullscreen_atom = self.internAtom("_NET_WM_STATE_FULLSCREEN");
+        self.f11_keycode = self.findKeycode(0xFFC5); // XK_F11
+    }
+
+    pub fn findKeycode(self: *X11Conn, keysym: u32) u8 {
+        if (self.min_keycode == 0 or self.max_keycode == 0 or self.max_keycode < self.min_keycode) return 0;
+        const count = self.max_keycode - self.min_keycode + 1;
+        // GetKeyboardMapping request (opcode 101)
+        var buf: [4]u8 = undefined;
+        buf[0] = 101; buf[1] = self.min_keycode;
+        write16(&buf, 2, @as(u16, @intCast(count)));
+        writeAll(self.fd, &buf);
+        // Read reply
+        var hdr: [32]u8 = undefined;
+        if (!readExact(self.fd, &hdr)) return 0;
+        if (hdr[0] != 1) return 0; // not a reply
+        const kpc = hdr[1]; // keysyms-per-keycode
+        const rlen = read32(&hdr, 4); // length in 4-bytes after fixed part
+        const total_data = rlen * 4;
+        if (total_data > 4096) return 0;
+        var kdata: [4096]u8 = undefined;
+        if (!readExact(self.fd, kdata[0..total_data])) return 0;
+        // Scan for keysym
+        var i: u32 = 0;
+        while (i < @as(u32, @intCast(count)) * kpc) : (i += 1) {
+            const ks = read32(&kdata, @as(usize, i) * 4);
+            if (ks == keysym) {
+                return self.min_keycode + @as(u8, @intCast(i / kpc));
+            }
+        }
+        return 0;
+    }
+
+pub fn setFullscreen(self: *X11Conn, fs: bool) void {
+    self.fullscreen = fs;
+    const nw: u16 = if (fs) @as(u16, @intCast(self.w)) else self.w_orig;
+    const nh: u16 = if (fs) @as(u16, @intCast(self.h)) else self.h_orig;
+    var buf: [16]u8 = undefined;
+    buf[0] = 12; buf[1] = 0;
+    write16(&buf, 2, 4);
+    write32(&buf, 4, self.wid);
+    write16(&buf, 8, 0x4 | 0x8);
+    write16(&buf, 10, 0);
+    write16(&buf, 12, nw);
+    write16(&buf, 14, nh);
+    writeAll(self.fd, &buf);
+    if (self.net_wm_state_atom != 0 and self.fullscreen_atom != 0) {
+        var ev: [32]u8 = .{0} ** 32;
+        ev[0] = 33; ev[1] = 32;
+        write32(&ev, 4, self.wid);
+        write32(&ev, 8, self.net_wm_state_atom);
+        write32(&ev, 12, if (fs) @as(u32, 1) else @as(u32, 0));
+        write32(&ev, 16, self.fullscreen_atom);
+        write32(&ev, 20, 0);
+        write32(&ev, 24, 1);
+        var req: [44]u8 = undefined;
+        req[0] = 25; req[1] = 0;
+        write16(&req, 2, 11);
+        write32(&req, 4, self.root);
+        write32(&req, 8, 0x00180000);
+        for (&ev, 0..) |b, j| { req[12 + j] = b; }
+        writeAll(self.fd, &req);
+    }
+}
 
     pub fn createGC(self: *X11Conn) void {
         var buf: [16]u8 = undefined;
@@ -330,6 +406,7 @@ pub const X11Conn = struct {
         if (!readExact(self.fd, &buf)) return null;
         const t = buf[0];
         if (t == 12) return XEvent{ .type = 12, .keycode = 0, .width = read16(&buf, 4), .height = read16(&buf, 6), .detail = 0, .event_x = 0, .event_y = 0 };
+        if (t == 22) return XEvent{ .type = 22, .keycode = 0, .width = read16(&buf, 20), .height = read16(&buf, 22), .detail = 0, .event_x = readI16(&buf, 16), .event_y = readI16(&buf, 18) };
         if (t == 2) return XEvent{ .type = 2, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
         if (t == 3) return XEvent{ .type = 3, .keycode = buf[1], .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
         if (t == 33) return XEvent{ .type = 33, .keycode = 0, .width = 0, .height = 0, .detail = 0, .event_x = 0, .event_y = 0 };
@@ -489,6 +566,8 @@ pub fn x11Open(display_num: i32) ?X11Conn {
     const id_base = read32(&data, 4);
     const vendor_len = read16(&data, 16);
     const num_formats = data[21];
+    const min_kc = data[22];
+    const max_kc = data[23];
 
     var off: usize = 32;
     off += @as(usize, vendor_len);
@@ -507,6 +586,9 @@ pub fn x11Open(display_num: i32) ?X11Conn {
     return X11Conn{
         .fd = fd, .root = root, .white_pixel = white, .black_pixel = black,
         .w = ww, .h = hh, .depth = depth, .wid = id_base + 1, .gc = id_base + 2,
+        .w_orig = 800, .h_orig = 600, .fullscreen = false,
+        .net_wm_state_atom = 0, .fullscreen_atom = 0, .f11_keycode = 0,
+        .min_keycode = min_kc, .max_keycode = max_kc,
     };
 }
 

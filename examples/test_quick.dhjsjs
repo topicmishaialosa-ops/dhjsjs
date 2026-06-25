@@ -1,0 +1,9 @@
+fn main() int {
+    hui disp = x11_open(400, 300, "test");
+    if disp == 0 {
+        return 0;
+    }
+    x11_present(disp);
+    x11_poll_event(disp);
+    return 1;
+}

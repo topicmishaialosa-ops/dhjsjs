@@ -1,0 +1,29 @@
+fn main() int {
+    hui gui = guiServer();
+    if (gui == 0) {
+        print("gui server failed\n");
+        return 1;
+    }
+
+    hui fd = gui & 0xffffffff;
+
+    setTheme(fd, 2);
+    setStyleRounding(fd, 8);
+
+    guiGradientV(fd, 0, 0, 800, 600, (darkblue << 32) | black);
+    guiPanel(fd, 28, 28, 744, 520, 0);
+    guiText(fd, 52, 52, 0, 18, skyblue, "GUI from dhjsjs");
+    guiLabel(fd, 52, 84, 0, 0, "No guiCmd calls here");
+    guiRect(fd, 52, 116, 300, 8, skyblue);
+    guiCircle(fd, 640, 130, 48, lime);
+    guiLine(fd, 560, 210, 720, 290, coral);
+    guiButton(fd, 1, 52, 150, 180, 34, 0, "Build");
+    guiButton(fd, 2, 248, 150, 180, 34, 0, "Run");
+    guiCheck(fd, 3, 52, 210, 260, 24, 1, "Native widgets");
+    guiSlider(fd, 4, 52, 260, 360, 28, 0, "Progress");
+
+    guiFrame(fd);
+    guiWait(fd);
+    guiCmd(fd, 0, 0, 0, 0, 0, 0, 0, "");
+    return 0;
+}

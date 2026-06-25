@@ -1,0 +1,4 @@
+fn main() int {
+    hui x = "hello";
+    return 0;
+}

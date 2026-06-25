@@ -1,0 +1,5 @@
+fn main() int {
+    hui a = 5;
+    hui b = a;
+    return b;
+}

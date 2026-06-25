@@ -1,0 +1,10 @@
+fn main() int {
+    print("before\n", 7);
+    hui win = x11_open(400, 300, "t");
+    print("after\n", 6);
+    if win == 0 {
+        print("null\n", 5);
+        return 1;
+    }
+    return 0;
+}

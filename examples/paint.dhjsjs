@@ -1,0 +1,66 @@
+fn main() int {
+    hui w = 640;
+    hui h = 480;
+
+    hui fb = fb_open();
+    hui disp = fb;
+
+    hui colors[6] = 0;
+    colors[0] = 0xFFFF0000;
+    colors[1] = 0xFF00FF00;
+    colors[2] = 0xFF0000FF;
+    colors[3] = 0xFFFFFF00;
+    colors[4] = 0xFFFF8800;
+    colors[5] = 0xFF000000;
+
+    hui cur = 0;
+    hui px = 0;
+    hui py = 0;
+    hui draw = 0;
+
+    while 1 {
+        set_bg(disp, 0xFFF0F0F0);
+
+        hui i = 0;
+        while i < 6 {
+            draw_button(disp, 10, 40 + i * 50, 40, 40, 6, colors[i], 0xFFFFFFFF, "");
+            i = i + 1;
+        }
+
+        filled_gradient(disp, 60, 40, w - 70, h - 50, 0xFFFFFFFF, 0xFFDDDDDD, 1);
+
+        if draw {
+            fb_fill(disp, px - 4, py - 4, 9, 9, colors[cur]);
+        }
+
+        present(disp);
+
+        hui ev = poll_event(disp);
+        if ev != 0 {
+            hui x = ev_x();
+            hui y = ev_y();
+
+            if ev == 1 {
+                if x >= 10 && x <= 50 && y >= 40 && y < 40 + 300 {
+                    cur = (y - 40) / 50;
+                } uebok {
+                    px = x;
+                    py = y;
+                    draw = 1;
+                }
+            }
+
+            if ev == 2 {
+                draw = 0;
+            }
+
+            if ev == 3 && draw {
+                line(disp, px, py, x, y, colors[cur]);
+                px = x;
+                py = y;
+            }
+
+            if ev == 4 { return 0; }
+        }
+    }
+}

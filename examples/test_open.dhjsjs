@@ -1,0 +1,4 @@
+fn main() int {
+    hui win = x11_open(400, 300, "t");
+    return 0;
+}

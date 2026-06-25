@@ -8,11 +8,9 @@ pub const SYS_RECV: usize = 45;
 pub const SYS_BIND: usize = 49;
 pub const SYS_LISTEN: usize = 50;
 pub const SYS_ACCEPT: usize = 43;
+pub const SYS_FSTAT: usize = 5;
 pub const SYS_GETPID: usize = 39;
 pub const SYS_NANOSLEEP: usize = 35;
-pub const SYS_OPENAT: usize = 257;
-pub const SYS_STAT: usize = 4;
-pub const SYS_FSTAT: usize = 5;
 pub const SYS_LSEEK: usize = 8;
 pub const SYS_DUP: usize = 32;
 pub const SYS_SETSOCKOPT: usize = 54;
@@ -286,6 +284,10 @@ pub fn exit(code: i32) noreturn {
 
 pub fn writeStr(fd: i32, str: [*]const u8, len: usize) void {
     _ = write(fd, str, len);
+}
+
+pub fn readDir(fd: i32, buf: []u8) isize {
+    return @bitCast(syscall3(217, @as(usize, @bitCast(@as(isize, fd))), @intFromPtr(buf.ptr), buf.len));
 }
 
 pub fn mmap(addr: ?*anyopaque, len: usize, prot: i32, flags: i32, fd: i32, off: i64) ?*anyopaque {

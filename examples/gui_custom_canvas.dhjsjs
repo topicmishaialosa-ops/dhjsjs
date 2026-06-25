@@ -1,0 +1,72 @@
+fn main() int {
+    hui gui = guiServer();
+    if (gui == 0) {
+        print("gui server failed\n");
+        return 1;
+    }
+
+    hui fd = gui & 0xffffffff;
+
+    setTheme(fd, 2);
+    setStyle(fd, 0, 0x10131A);
+    setStyle(fd, 1, 0x171B24);
+    setStyle(fd, 2, 0x263248);
+    setStyle(fd, 3, 0x33435E);
+    setStyle(fd, 4, 0xE8EDF7);
+    setStyle(fd, 5, 0x44C7A8);
+    setStyle(fd, 6, 0x334052);
+    setStyle(fd, 10, 0x1E8F7D);
+    setStyle(fd, 11, 0xF5FBFF);
+    setStyle(fd, 12, 0x8D98AA);
+    setStyle(fd, 13, 0x7AE4C6);
+    setStyle(fd, 16, 0x263248);
+    setStyle(fd, 17, 0x44C7A8);
+    setStyle(fd, 25, 10);
+    setStyle(fd, 26, 14);
+    setStyle(fd, 27, 34);
+    setStyle(fd, 28, 8);
+    setStyle(fd, 29, 10);
+
+    hui w = 800;
+    hui h = 600;
+    hui panel = 0x171B24;
+    hui border = 0x334052;
+    hui accent = 0x44C7A8;
+    hui accent2 = 0xFFB45E;
+    hui text = 0xE8EDF7;
+    hui muted = 0x8D98AA;
+
+    guiGradient(fd, 0, 0, w, h, 0x10131A, 0x182235, 0);
+    guiShadow(fd, 40, 36, 720, 500, 40);
+    guiRoundRect(fd, 40, 36, 720, 500, 14, panel);
+    guiBorder(fd, 40, 36, 720, 500, border);
+
+    guiText(fd, 64, 58, 0, 16, text, "dhjsjs custom GUI");
+    guiText(fd, 64, 86, 0, 8, muted, "theme fields + native canvas commands");
+
+    guiGradient(fd, 64, 122, 280, 16, accent, accent2, 1);
+    guiRoundRect(fd, 64, 158, 280, 96, 10, 0x202838);
+    guiBorder(fd, 64, 158, 280, 96, 0x3D4B60);
+    guiText(fd, 82, 176, 0, 8, text, "Rounded canvas panel");
+    guiLine(fd, 82, 220, 316, 182, accent);
+    guiBezier(fd, 82, 232, 160, 130, 316, 238, accent2);
+
+    guiClip(fd, 392, 118, 304, 168);
+    guiRoundRect(fd, 392, 118, 304, 168, 10, 0x111722);
+    guiTriangle(fd, 424, 250, 544, 134, 674, 250, accent);
+    guiCircle(fd, 544, 190, 44, accent2);
+    guiLine(fd, 392, 118, 696, 286, 0xFFFFFF);
+    guiNoClip(fd);
+    guiBorder(fd, 392, 118, 304, 168, border);
+    guiText(fd, 406, 300, 0, 8, muted, "canvas clip, triangle, circle, bezier");
+
+    guiButton(fd, 1, 64, 342, 140, 34, 0, "Build");
+    guiButton(fd, 2, 220, 342, 140, 34, 0, "Run");
+    guiCheck(fd, 3, 64, 404, 220, 24, 1, "Custom style");
+    guiSlider(fd, 4, 64, 454, 320, 28, 1, "Canvas power");
+
+    guiFrame(fd);
+    guiWait(fd);
+    guiCmd(fd, 0, 0, 0, 0, 0, 0, 0, "");
+    return 0;
+}

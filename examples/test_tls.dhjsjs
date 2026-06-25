@@ -1,0 +1,9 @@
+fn main() int {
+    hui body = tls.get("example.com", "/");
+    if body == 0 {
+        print("FAIL\n", 5);
+        return 1;
+    }
+    print("OK\n", 3);
+    return 0;
+}
