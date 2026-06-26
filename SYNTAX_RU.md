@@ -2786,7 +2786,7 @@ resolve_hostname(host)
 4. Парсит ответ
 5. Возвращает IP как 32-битное число
 
-**Как работает:** на x86-64 через fork+exec `http_client resolve`; на ARM64 через inline UDP DNS (syscalls socket/sendto/ppoll/recvfrom, без fork).
+**Как работает:** на всех платформах через inline UDP DNS (syscalls socket/sendto/ppoll/recvfrom, без fork+exec).
 
 **Примеры:**
 ```
@@ -2830,9 +2830,8 @@ httpget(host, path)
 **Возвращаемое значение:** строка с ответом сервера
 
 **Описание:**
-1. На x86-64: pipe + fork + exec `http_client` GET. Дочерний процесс запускает http_client, родитель читает ответ из pipe.
-2. На ARM64 (в т.ч. Android): inline ARM64 код — inline DNS resolution, socket, connect, write HTTP request, read response (без fork+exec).
-3. Буфер ответа живёт до следующего похожего вызова.
+1. На всех платформах: inline код — DNS resolution, socket, connect, write HTTP request, read response (без fork+exec, без внешнего http_client).
+2. Буфер ответа живёт до следующего похожего вызова.
 
 **Примеры:**
 ```
@@ -2984,7 +2983,7 @@ guiserver()
 **Аргументы:** нет
 
 **Описание:**
-- `guiApp()` — запускает графический сервер `gui_srv` через fork+exec
+- `guiApp()` — запускает графический сервер (fork + вызов gui_srv.main() без exec)
 - `guiServer()` — обрабатывает события GUI в цикле
 
 **Пример (простое окно):**
@@ -3527,7 +3526,7 @@ playerapp()
 - `path` — путь к файлу (`string`)
 
 **Описание:**
-- `wavplay`, `mp3play`, `audioplay` запускают `media_player` через fork+exec
+- `wavplay`, `mp3play`, `audioplay` — встроенный декодер (прямой вызов `player_mod.playFile`, без fork+exec)
 - `playerapp()` открывает GUI-плеер
 
 **Примеры:**

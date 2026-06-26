@@ -628,18 +628,10 @@ fn main() {
 }
 ```
 
-**Как работает http.get на x86-64 Linux:**
-1. Создаёт pipe (канал)
-2. Делает fork (создаёт дочерний процесс)
-3. В дочернем процессе запускает `http_client`
-4. http_client делает DNS запрос (через `/etc/hosts`, `/etc/resolv.conf` или UDP к 8.8.8.8:53), подключается к серверу, отправляет HTTP/1.0 запрос
-5. Результат читается из pipe
-
-**Как работает http.get на ARM64 (в т.ч. Android):**
-1. Генерирует inline ARM64 код с прямыми сисвызовами (без fork+exec)
-2. Выполняет DNS-запрос через UDP к 8.8.8.8:53 (inline код)
-3. Создаёт сокет, подключается, отправляет HTTP запрос
-4. Читает ответ и возвращает его
+**Как работает http.get на всех платформах (x86-64, ARM64, Windows):**
+Генерируется inline-код с прямыми сисвызовами (без fork+exec, без внешнего `http_client`).  
+DNS‑запрос выполняется через UDP к 8.8.8.8:53, затем создаётся сокет, отправляется HTTP‑запрос и читается ответ.  
+Не требуется запуск отдельного `http_client` или `curl`.
 
 ### HTTP POST запрос
 
@@ -1672,24 +1664,24 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `accept(fd)` | принять клиента |
 | `send(fd, buf, len, flags)` | отправить |
 | `recv(fd, buf, len, flags)` | принять |
-| `resolve(host)` | DNS resolve (x86: fork+exec http_client, ARM64: inline UDP DNS) |
+| `resolve(host)` | DNS resolve (inline UDP DNS, без внешнего бинарника) |
 | `resolve_hostname(host)` | alias для `resolve` |
-| `http.get(host, path)` | GET (x86: fork+exec http_client, ARM64: inline socket+DNS) |
+| `http.get(host, path)` | GET (inline socket+DNS, без fork+exec) |
 | `http_get(host, path)` | alias |
 | `httpget(host, path)` | alias |
-| `http.post(host, path, body)` | POST (x86: fork+exec http_client, ARM64: inline socket+DNS) |
+| `http.post(host, path, body)` | POST (inline socket+DNS) |
 | `http_post(host, path, body)` | alias |
 | `httppost(host, path, body)` | alias |
-| `tls.get(host, path)` | TLS/HTTPS GET |
+| `tls.get(host, path)` | TLS/HTTPS GET (inline, встроенная реализация) |
 | `tls_get(host, path)` | alias |
 | `tlsget(host, path)` | alias |
-| `tls.post(host, path, body)` | TLS/HTTPS POST |
+| `tls.post(host, path, body)` | TLS/HTTPS POST (inline) |
 | `tls_post(host, path, body)` | alias |
 | `tlspost(host, path, body)` | alias |
-| `https.get(host, path)` | HTTPS GET (fork+exec curl -s URL) |
+| `https.get(host, path)` | alias для `tls.get` |
 | `https_get(host, path)` | alias |
 | `httpsget(host, path)` | alias |
-| `https.post(host, path, body)` | HTTPS POST (fork+exec curl -s -X POST -d body URL) |
+| `https.post(host, path, body)` | alias для `tls.post` |
 | `https_post(host, path, body)` | alias |
 | `httpspost(host, path, body)` | alias |
 
@@ -1699,7 +1691,7 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 
 | Функция | Назначение |
 |---------|------------|
-| `guiApp()` / `guiapp()` | запустить `gui_srv` простым способом |
+| `guiApp()` / `guiapp()` | запустить графический сервер (встроенный, без внешнего `gui_srv`) |
 | `guiServer()` / `guiserver()` | запустить GUI-сервер с pipe-протоколом и вернуть fd-пару |
 | `guiCmd(fd, type, id, x, y, w, h, val, label)` | отправить низкоуровневую команду виджета |
 | `setTheme(fd, theme_id)` | отправить команду смены темы |
@@ -1742,9 +1734,9 @@ dhjsjs_cc build app.dhjsjs --target apk -o app.apk \
 | `audio_pause(fd)` | пауза |
 | `audio_stop(fd)` | alias паузы/остановки |
 | `audio_play(fd)` | продолжить |
-| `wavplay(path)` | запустить `media_player` для WAV |
-| `mp3play(path)` | запустить `media_player` для MP3 |
-| `audioplay(path)` | запустить `media_player` |
+| `wavplay(path)` | проиграть WAV (встроенный декодер, без внешнего бинарника) |
+| `mp3play(path)` | проиграть MP3 (встроенный декодер) |
+| `audioplay(path)` | проиграть любой поддерживаемый аудиофайл |
 | `playerapp()` | открыть GUI-плеер |
 
 Декодер MP3 ориентирован на MPEG-1 Layer III common case, декодер OGG реализует Vorbis floor type 1 и residue 0/1. На выходе используется signed 16-bit PCM 44.1 kHz stereo.
@@ -2045,10 +2037,9 @@ dhjsjs_cc build app.dhjsjs --target linux
 
 Проверьте:
 
-1. Собран ли `http_client` рядом с программой.
-2. Есть ли сеть и DNS.
-3. Правильно ли передан host без `http://`.
-4. Path начинается с `/`.
+1. Есть ли сеть и DNS.
+2. Правильно ли передан host без `http://`.
+3. Path начинается с `/`.
 
 Правильно:
 
@@ -2066,10 +2057,8 @@ http.get("http://example.com", "index.html");
 
 Проверьте:
 
-1. Собран ли `gui_srv`.
-2. Запускается ли программа из директории, где лежит `./gui_srv`.
-3. Есть ли графический backend: X11, Wayland или Win32.
-4. Не забыта ли отправка frame-команды при низкоуровневом `guiCmd`.
+1. Есть ли графический backend: X11, Wayland или Win32.
+2. Не забыта ли отправка frame-команды при низкоуровневом `guiCmd`.
 
 ### Android HTTP не работает
 
@@ -2092,11 +2081,12 @@ http.get("http://example.com", "index.html");
 | `src/codegen_arm.zig` | ARM64 ELF writer |
 | `src/codegen_rv.zig` | RISC-V writer |
 | `src/sys.zig` | syscall, DNS, hosts/resolv.conf |
-| `src/http_client.zig` | отдельный HTTP-клиент |
+| `src/http_client.zig` | HTTP клиент (используется inline, без внешнего бинарника) |
+| `src/tls.zig` | TLS/HTTPS подсистема (handshake, шифрование) |
 | `src/audio.zig` | WAV/MP3/OGG decode/playback helpers |
 | `src/gui.zig` | immediate-mode GUI |
 | `src/gui_ext.zig` | расширенные виджеты |
-| `src/gui_srv.zig` | GUI-сервер pipe-протокола |
+| `src/gui_srv.zig` | GUI-сервер pipe-протокола (встроенный, не требует отдельного бинарника) |
 | `src/display.zig` | общий display backend |
 | `src/x11.zig` | X11 |
 | `src/wayland.zig` | Wayland |
@@ -2104,26 +2094,23 @@ http.get("http://example.com", "index.html");
 | `src/android_gui.zig` | Android render loop |
 | `src/android_bridge.zig` | Android command bridge |
 
-### Почему HTTP сделан через отдельный процесс
+### Как работает HTTP
 
-На Linux builtin `http.get` генерирует код, который создаёт pipe, делает `fork`, запускает `./http_client`, читает ответ из pipe и возвращает указатель на буфер. Это упрощает кодогенерацию языка: сложная сеть и DNS остаются в обычном Zig-файле `http_client.zig`.
+На всех платформах builtin `http.get`/`http.post` генерирует inline-код с прямыми syscall-ами (socket, connect, write, read). DNS-запрос выполняется через UDP к 8.8.8.8:53 inline.  
+Никаких fork+exec или внешних `http_client` не требуется — всё работает внутри процесса.
 
-### Почему Android HTTP отдельный
-
-На Android нельзя полагаться на `fork+exec` так же, как на Linux. Поэтому `android_http_get` и `android_http_post` генерируют inline ARM64 syscall-последовательность: socket, connect, write, read.
+`tls.get`/`tls.post` используют встроенную подсистему TLS (`tls.zig`) — рукопожатие, шифрование, расшифровка выполняются inline.
 
 ### Как работает GUI
 
-Есть два слоя:
-
-1. Высокоуровневый immediate-mode GUI в `gui.zig`.
-2. Отдельный `gui_srv`, который принимает бинарные команды по pipe.
-
-Высокоуровневые виджеты полезны для приложений внутри проекта. `gui_srv` полезен для программ на dhjsjs, которые хотят рисовать окно через отдельный процесс.
+GUI полностью встроен:
+1. Высокоуровневые immediate-mode виджеты (`gui.zig`) — кнопки, слайдеры, чекбоксы, холст.
+2. `guiApp()` запускает GUI-сервер внутри процесса (fork, но без exec).
+3. Для межпроцессного взаимодействия существует pipe-протокол (`gui_srv`), но отдельный бинарник `gui_srv` не требуется.
 
 ### Как работает аудио
 
-`media_player` использует `audio.zig`. MP3 и OGG декодируются в PCM, затем PCM отдаётся в аудиовывод. Это не обёртка над внешним декодером: таблицы, IMDCT, синтез и Vorbis-части реализованы в исходниках проекта.
+Аудио-декодеры WAV/MP3/OGG встроены в `audio.zig` и используются без внешнего бинарника: `wavplay`/`mp3play` вызывают их напрямую. MP3 и OGG декодируются в PCM, затем PCM отдаётся в аудиовывод. Это не обёртка над внешним декодером: таблицы, IMDCT, синтез и Vorbis-части реализованы в исходниках проекта.
 
 ### Как работает ввод
 

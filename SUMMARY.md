@@ -15,7 +15,8 @@
 - **win32.zig**: Windows GDI display backend
 - **wayland.zig**: Wayland display server protocol
 - **tty.zig**: Terminal (VT100/ANSI) display backend
-- **http_client.zig**: Standalone HTTP client binary (used by compiler builtins)
+- **http_client.zig**: HTTP client module (used inline, no separate binary needed)
+- **tls.zig**: TLS/HTTPS handshake and encryption (inline, built-in)
 - **http.zig**: Dead code (unused Zig helper, kept for reference)
 
 ## Display Backends
@@ -28,20 +29,20 @@
 | 20   | Win32   | Windows  | ✅ Compiles on Linux (stub mode) |
 
 ## HTTP/HTTPS Client
-- HTTP implementation uses three strategies depending on platform:
-  - **x86-64 Linux**: `fork+exec http_client` for HTTP, `fork+exec curl` for HTTPS
-  - **ARM64 (Android)**: Inline ARM64 syscalls (socket/connect/send/recv, inline UDP DNS) — no fork needed
+- HTTP implementation uses inline strategies on all platforms (no fork+exec):
+  - **All platforms**: Inline syscalls (socket/connect/send/recv, inline UDP DNS) — no fork needed, no external binary
 - Compiler builtins:
-  - `http.get(host, path)` / `http_get` / `httpget` — GET (x86: fork+exec http_client, ARM64: inline)
-  - `http.post(host, path, body)` / `http_post` / `httppost` — POST
-  - `https.get(host, path)` / `https_get` / `httpsget` — HTTPS GET via fork+exec curl
-  - `https.post(host, path, body)` / `https_post` / `httpspost` — HTTPS POST via fork+exec curl
-  - `resolve(hostname)` / `resolve_hostname` — DNS (x86: fork+exec, ARM64: inline UDP)
-  - ARM64 inline DNS: UDP query to 8.8.8.8:53 via socket/sendto/ppoll/recvfrom, timeout 5s
-  - ARM64 inline HTTP: DNS resolve → socket → connect → write → read loop → response pointer
-  - HTTPS curl: pipe+fork+exec `/bin/sh -c "curl -s URL"` (requires curl on target)
+  - `http.get(host, path)` / `http_get` / `httpget` — GET (inline socket+DNS)
+  - `http.post(host, path, body)` / `http_post` / `httppost` — POST (inline)
+  - `tls.get(host, path)` / `tls_get` / `tlsget` — TLS/HTTPS GET (built-in TLS)
+  - `tls.post(host, path, body)` / `tls_post` / `tlspost` — TLS/HTTPS POST (built-in TLS)
+  - `https.get(host, path)` / `https_get` / `httpsget` — alias for `tls.get`
+  - `https.post(host, path, body)` / `https_post` / `httpspost` — alias for `tls.post`
+  - `resolve(hostname)` / `resolve_hostname` — DNS (inline UDP)
+  - Inline DNS: UDP query to 8.8.8.8:53 via socket/sendto/ppoll/recvfrom, timeout 5s
+  - Inline HTTP: DNS resolve → socket → connect → write → read loop → response pointer
+  - TLS built-in: handshake, encryption, decryption performed inline using `tls.zig`
   - All builtins save args to registers before buffer allocation
-  - Response captured via pipe or stack pointer
 
 ## Bugfixes Applied
 - HTTP client dotted-decimal detection fixed (oi==4 && hi==hlen check)
@@ -60,13 +61,14 @@
 - **compiler.zig**: 9 `jmpRel32` instructions had off-by-one `patch32` (5-byte jumps used 6-byte offset formula) — caused segfault in x11_open
 - **gui.zig Canvas init**: X11 crash fixed — `gui.canvas` must be initialized with `gfx.Canvas.init(&fb)`, not `undefined`, otherwise `xconn` field is garbage leading to GP fault in `beginFrame`
 
-## Inline Binary Dependencies (removed fork+exec)
+## Inline Binary Dependencies (no exec outside)
+- **http.get/http.post/tls.get/tls.post**: All inline (no external http_client or tls needed)
 - **audioplay**: Now calls `player_mod.playFile` directly (like `wavplay`/`mp3play`), no fork+exec
 - **playerapp**: Forks + calls `media_player.main()` directly, no exec
 - **guiApp/guiapp**: Forks + calls `gui_srv.main()` directly, no exec
 - **guiServer/guiserver**: Forks + calls `gui_srv.main()` directly, removed /proc/self/environ envp setup (was only needed for execve)
 - Dead `emitTlsClientX64` function removed (never called; TLS already inline)
-- **Makefile**: Now only builds `dhjsjs` and `dhjsjs_cc` (all helper binaries removed)
+- **Makefile**: Builds all helper binaries for development convenience, but only `dhjsjs` and `dhjsjs_cc` are required
 
 ## Font System
 - Custom 8×8 bitmap font (hand-designed, 95 glyphs ASCII 32–126)
@@ -113,8 +115,8 @@
 - Integrated with IDE: canvas preview tab shows the rendered output in real time
 
 ## Sound/Audio
-- `wavplay(path)` / `mp3play(path)` → fork media_player, wait (inline)
-- `playerapp()` → fork media_player (detached, inline)
+- `wavplay(path)` / `mp3play(path)` → direct call to decoder (inline, no fork)
+- `playerapp()` → fork + call media_player.main() directly (no exec)
 - `audioplay(freq, duration, ...)` → OSS /dev/dsp playback (direct call, no fork)
 - `audio()` → configure audio format/channels/speed
 
@@ -137,7 +139,7 @@
 ## Known Limitations
 - Win32 backend cannot be tested without a Windows host
 - `http.get`/`http.post` always connect to default port 80 (no port argument in builtin)
-- HTTPS requires `curl` installed on the target system (inline TLS is not implemented)
+- TLS/HTTPS built-in (no external curl required)
 - `src/http.zig` is dead code (unused Zig HTTP library)
 - IDE: fonts are scaled bitmaps (no TrueType), no bold/italic/antialiasing
 - IDE: no file tree directory scanning (lists only open files)

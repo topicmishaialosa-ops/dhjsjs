@@ -773,8 +773,8 @@ struct Point { x: int, y: int }
 ### Категории builtins
 
 1. **Прямые syscall-обёртки** — каждый builtin превращается в один syscall
-2. **Составные builtins** — последовательность инструкций (pipe+fork+exec)
-3. **Специализированные** — генерация уникального кода (GUI, аудио, графика)
+2. **Inline-сеть и аудио** — inline socket/DNS/TLS/аудио­декодирование (без fork+exec)
+3. **Специализированные** — генерация уникального кода (GUI, графика)
 
 ### Полный список builtins
 
@@ -834,31 +834,31 @@ struct Point { x: int, y: int }
 | `send(fd, buf, len, flags)` | syscall send | Отправить |
 | `recv(fd, buf, len, flags)` | syscall recv | Принять |
 
-**Составные builtins (fork+exec на x86, inline на ARM64):**
+**Составные builtins (inline на всех платформах, без fork+exec):**
 
 | Имя | Что делает |
 |-----|-----------|
-| `http.get(host, path)` | x86: pipe+fork→exec http_client GET; ARM64: inline socket+DNS |
-| `http.post(host, path, body)` | x86: pipe+fork→exec http_client POST; ARM64: inline socket+DNS |
+| `http.get(host, path)` | inline socket+DNS (все платформы, без внешнего бинарника) |
+| `http.post(host, path, body)` | inline socket+DNS |
 | `http_get(host, path)` | алиас для http.get |
 | `httpget(host, path)` | алиас для http.get |
 | `http_post(host, path, body)` | алиас для http.post |
 | `httppost(host, path, body)` | алиас для http.post |
-| `resolve(host)` | x86: pipe+fork→exec http_client resolve; ARM64: inline UDP DNS |
+| `resolve(host)` | inline UDP DNS |
 | `resolve_hostname(host)` | алиас для resolve |
-| `tls.get(host, path)` | TLS/HTTPS GET builtin |
+| `tls.get(host, path)` | TLS/HTTPS GET builtin (встроенный TLS handshake) |
 | `tls_get(host, path)` | алиас для tls.get |
 | `tlsget(host, path)` | алиас для tls.get |
 | `tls.post(host, path, body)` | TLS/HTTPS POST builtin |
 | `tls_post(host, path, body)` | алиас для tls.post |
 | `tlspost(host, path, body)` | алиас для tls.post |
-| `https.get(host, path)` | pipe+fork→exec /bin/sh -c "curl -s URL" (требуется curl) |
+| `https.get(host, path)` | алиас для `tls.get` |
 | `https_get(host, path)` | алиас для https.get |
 | `httpsget(host, path)` | алиас для https.get |
-| `https.post(host, path, body)` | pipe+fork→exec /bin/sh -c "curl -s -X POST -d 'body' URL" |
+| `https.post(host, path, body)` | алиас для `tls.post` |
 | `https_post(host, path, body)` | алиас для https.post |
 | `httpspost(host, path, body)` | алиас для https.post |
-| `guiApp()` / `guiapp()` | pipe + fork → exec gui_srv |
+| `guiApp()` / `guiapp()` | fork + вызов gui_srv.main() (без exec) |
 
 **Графика (Framebuffer):**
 
@@ -1083,115 +1083,38 @@ width / height — размеры окна
 
 ### Архитектура
 
-Сеть в dhjsjs реализована тремя способами:
+Сеть в dhjsjs реализована единым inline-способом на всех платформах (без fork+exec, без внешних бинарников):
 
 | Способ | Где используется | Описание |
 |--------|-----------------|----------|
-| fork+exec http_client | x86-64 Linux | pipe+fork+execve для HTTP и resolve |
-| Inline socket syscalls | ARM64 (Android) | Прямые сисвызовы socket/connect/send/recv, без fork |
-| fork+exec curl | Все платформы (HTTPS) | `/bin/sh -c "curl -s URL"` для HTTPS |
+| Inline socket syscalls | Все платформы | Прямые сисвызовы socket/connect/send/recv, inline DNS, inline TLS |
 
-### http_client (исполняемый файл)
+### HTTP/HTTPS builtins (все платформы)
 
-`http_client.zig` (217 строк) — отдельный исполняемый файл, HTTP/1.0 клиент для x86-64 builtins.
+`http.get()`, `http.post()` и `resolve()` генерируют inline машинный код — без fork+exec, без внешнего `http_client`.
 
-```
-Использование: http_client <method> <host> [port] <path> [body]
-```
-
-Аргументы:
-- `method`: GET, POST, resolve
-- `host`: домен или IP
-- `port`: опционально, по умолчанию 80
-- `path`: путь запроса (начинается с /)
-- `body`: только для POST
-
-**Как работает http_client:**
-1. Принимает аргументы из argv
-2. Если method=resolve: выполняет DNS-запрос через `resolveHostname()`, выводит 4 байта IP в stdout
-3. Если method=GET/POST: создаёт socket, connect, отправляет HTTP/1.0 запрос, читает ответ в буфер, выводит в stdout
-
-**HTTP запрос:**
-```
-GET /path HTTP/1.0\r\n
-Host: example.com\r\n
-\r\n
-```
-
-Для POST:
-```
-POST /path HTTP/1.0\r\n
-Host: example.com\r\n
-Content-Length: N\r\n
-Content-Type: application/x-www-form-urlencoded\r\n
-\r\n
-body
-```
-
-### x86-64: fork+exec для HTTP и resolve
-
-На x86-64 `http.get()`, `http.post()` и `resolve()` работают через fork+exec:
-
-```
-Программа dhjsjs:
-  http.get("example.com", "/")
-
-  1. pipe() → [rd, wr]
-  2. fork()
-     ┌─ Parent ───────────────────────────┐
-     │  close(wr)                         │
-     │  read(rd, buf, 8192)  ← ожидает    │
-     │  wait(NULL)          ← ждёт ребёнка│
-     │  возвращает buf                    │
-     └────────────────────────────────────┘
-     ┌─ Child ────────────────────────────┐
-     │  close(rd)                         │
-     │  dup2(wr, 1)  ← перенаправляет     │
-     │                  stdout в pipe     │
-     │  execve("http_client", ...)        │
-     └────────────────────────────────────┘
-```
-
-Этот же механизм используется для `resolve()`, `guiApp()`, `wavplay()`, `mp3play()`.
-
-### ARM64: inline HTTP + DNS (compiler_arm.zig)
-
-На ARM64 (включая Android) `http.get()`, `http.post()` и `resolve()` генерируют inline машинный код — без fork+exec:
-
-**DNS resolve (`emitInlineResolveAarch64`):**
-1. Создаёт UDP socket (syscall 198)
-2. Отправляет DNS query на 8.8.8.8:53 (syscall 211 sendto)
-3. Ждёт ответ с таймаутом через ppoll (syscall 73)
-4. Читает ответ (syscall 212 recvfrom)
+**DNS resolve (`emitInlineResolveX64` / `emitInlineResolveAarch64`):**
+1. Создаёт UDP socket
+2. Отправляет DNS query на 8.8.8.8:53
+3. Ждёт ответ с таймаутом через ppoll
+4. Читает ответ
 5. Парсит DNS header (12 байт), вопрос, A-запись (type=1, class=1)
-6. Возвращает 4 байта IPv4 в X0
+6. Возвращает 4 байта IPv4
 
-**HTTP (`emitInlineHttpAarch64`):**
+**HTTP:**
 1. Вызывает inline DNS resolve для преобразования hostname → IP
-2. Создаёт TCP socket (syscall 198)
-3. Подключается к серверу (syscall 203 connect)
-4. Отправляет HTTP/1.0 запрос (syscall 64 write)
-5. Читает ответ в цикле (syscall 63 read) до закрытия соединения
+2. Создаёт TCP socket
+3. Подключается к серверу
+4. Отправляет HTTP/1.0 запрос
+5. Читает ответ в цикле до закрытия соединения
 6. Возвращает указатель на ответ (стековый буфер)
 
-### HTTPS: fork+exec curl
+**TLS/HTTPS:**
+- `tls.get()` / `tls.post()` используют встроенную TLS-подсистему (`tls.zig`): handshake, шифрование, расшифровка выполняются inline.
+- `https.get()` / `https.post()` — алиасы для `tls.get()` / `tls.post()`.
+- Никаких `curl` или внешних программ не требуется.
 
-На всех платформах `https.get()` и `https.post()` используют fork+exec `/bin/sh`:
-
-```
-  pipe() → fork()
-    child: dup2(pipe_write, 1), exec /bin/sh -c "curl -s URL"
-    parent: close(pipe_write), read(pipe_read), close(pipe_read), wait4()
-    возвращает ответ
-```
-
-Для POST тело передаётся через `-X POST -d 'body'`. Требуется установленный `curl` на целевой системе.
-
-**Команда curl:**
-- GET: `curl -s https://host/path`
-- POST: `curl -s -X POST -d 'body' https://host/path`
-
-Функция `emitForkExecCurlX64()` собирает команду на стеке, затем выполняет pipe+fork+exec.
+**`guiApp()` / `guiapp()`:** fork + вызов `gui_srv.main()` (без exec).
 
 ### http.zig (клиент для IDE)
 
@@ -1234,7 +1157,7 @@ audio_play(fd)
 
 - **Поддерживаемые форматы:** WAV, MP3, OGG, FLAC, AIFF
 - **Функции:** плейлист, ползунок громкости/позиции, визуализатор, тёмная тема
-- **Архитектура:** отдельный процесс, запускается через fork+exec из dhjsjs программы
+- **Архитектура:** может быть отдельным процессом; `playerapp()` запускает его через fork+вызов `main()` (без exec). Прямые вызовы `wavplay`/`mp3play` декодируют inline, без отдельного процесса.
 
 ### Декодеры (audio.zig)
 
@@ -2161,12 +2084,12 @@ make clean    # очистка
 ### Цели сборки
 
 ```
-dhjsjs           — IDE, редактор кода
-dhjsjs_cc        — компилятор командной строки
-media_player     — аудио плеер
-desktop_gui      — демо GUI
-gui_srv          — сервер GUI
-http_client      — HTTP клиент
+dhjsjs           — IDE, редактор кода (обязателен)
+dhjsjs_cc        — компилятор командной строки (обязателен)
+media_player     — аудио плеер (опционально, standalone)
+desktop_gui      — демо GUI (опционально)
+gui_srv          — сервер GUI (опционально)
+http_client      — HTTP клиент (опционально, standalone)
 ```
 
 Каждый бинарник собирается отдельной командой `zig build-exe` с указанием всех исходных файлов.

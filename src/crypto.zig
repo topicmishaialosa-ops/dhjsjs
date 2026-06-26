@@ -131,7 +131,9 @@ pub fn biFromBytes(bytes: []const u8) BigInt {
     while (i < bytes.len) {
         const idx = @as(usize, @intCast(i / 4));
         if (idx >= MAX_LIMBS) break;
-        r.limbs[idx] = (r.limbs[idx] << 8) | @as(u32, bytes[bytes.len - 1 - i]);
+        const src_pos = bytes.len - 1 - i;
+        const shift = @as(u5, @intCast((i % 4) * 8));
+        r.limbs[idx] |= @as(u32, bytes[src_pos]) << shift;
         i += 1;
     }
     r.len = (bytes.len + 3) / 4;
@@ -568,6 +570,99 @@ pub fn rsaSignHash(key: *const RsaPrivateKey, hash: *const [32]u8, signature: *[
     biToBytes(&s_res, signature[0..RSA_KEY_BYTES]);
 }
 
+fn bitLen(a: *const BigInt) usize {
+    if (a.len == 0) return 0;
+    var bits = (a.len - 1) * 32;
+    var top = a.limbs[a.len - 1];
+    while (top > 0) {
+        bits += 1;
+        top >>= 1;
+    }
+    return bits;
+}
+
+pub fn mgf1(seed: []const u8, mask_len: usize, out: []u8) void {
+    var counter: u32 = 0;
+    var off: usize = 0;
+    while (off < mask_len) {
+        var c: [4]u8 = undefined;
+        c[0] = @as(u8, @intCast(counter >> 24));
+        c[1] = @as(u8, @intCast(counter >> 16));
+        c[2] = @as(u8, @intCast(counter >> 8));
+        c[3] = @as(u8, @truncate(counter));
+        var hash_input: [256]u8 = undefined;
+        @memcpy(hash_input[0..seed.len], seed);
+        @memcpy(hash_input[seed.len..][0..4], &c);
+        var hash_out: [32]u8 = undefined;
+        sha256(hash_input[0..seed.len + 4], &hash_out);
+        const copy_len = @min(32, mask_len - off);
+        @memcpy(out[off..][0..copy_len], hash_out[0..copy_len]);
+        off += copy_len;
+        counter += 1;
+    }
+}
+
+pub fn verifyRsaPssSignature(content_hash: []const u8, sig: []const u8, n: *const BigInt, e: *const BigInt) bool {
+    const emLen = RSA_KEY_BYTES;
+    const hLen: usize = 32;
+    const sLen: usize = 32;
+    if (sig.len != emLen) return false;
+    if (content_hash.len != hLen) return false;
+
+    var sig_bn = biFromBytes(sig);
+    var em_bn: BigInt = undefined;
+    biModExp(&sig_bn, e, n, &em_bn);
+    var em: [RSA_KEY_BYTES]u8 = undefined;
+    biToBytes(&em_bn, em[0..RSA_KEY_BYTES]);
+
+    if (em[emLen - 1] != 0xBC) return false;
+
+    const maskedDB = em[0 .. emLen - hLen - 1];
+    const H = em[emLen - hLen - 1 .. emLen - 1];
+
+    var dbMask: [256]u8 = undefined;
+    mgf1(H, emLen - hLen - 1, dbMask[0..]);
+
+    var DB: [256]u8 = undefined;
+    for (maskedDB, 0..) |b, i| DB[i] = b ^ dbMask[i];
+
+    const modBits = bitLen(n);
+    const emBits = modBits - 1;
+    const db_clear_bits = 8 * emLen - emBits;
+    if (db_clear_bits > 0 and db_clear_bits <= 8 * emLen) {
+        var bits_left = db_clear_bits;
+        var byte_idx: usize = 0;
+        while (bits_left >= 8) {
+            DB[byte_idx] = 0;
+            byte_idx += 1;
+            bits_left -= 8;
+        }
+        if (bits_left > 0) {
+            DB[byte_idx] &= @as(u8, 0xFF) >> @as(u3, @intCast(bits_left));
+        }
+    }
+
+    const zero_pad_len = emLen - hLen - sLen - 2;
+    for (0..zero_pad_len) |i| {
+        if (DB[i] != 0) return false;
+    }
+    if (DB[zero_pad_len] != 0x01) return false;
+
+    const salt = DB[zero_pad_len + 1 .. zero_pad_len + 1 + sLen];
+
+    var m_prime: [8 + 32 + 32]u8 = undefined;
+    for (0..8) |i| m_prime[i] = 0;
+    @memcpy(m_prime[8..][0..hLen], content_hash);
+    @memcpy(m_prime[8 + hLen ..][0..sLen], salt);
+    var h2: [32]u8 = undefined;
+    sha256(&m_prime, &h2);
+
+    for (0..hLen) |i| {
+        if (H[i] != h2[i]) return false;
+    }
+    return true;
+}
+
 // ============================== APK v2 Signing ==============================
 
 fn w32le(buf: []u8, pos: usize, v: u32) void {
@@ -853,6 +948,463 @@ pub fn apkSign(apk_data: []const u8, out: []u8, key: *const RsaPrivateKey) usize
         out_pos += comment_len;
     }
     return out_pos;
+}
+
+// ============================== ChaCha20 ==============================
+
+fn chacha20QuarterRound(a: *u32, b: *u32, c: *u32, d: *u32) void {
+    a.* +%= b.*; d.* ^= a.*; d.* = (d.* << 16) | (d.* >> 16);
+    c.* +%= d.*; b.* ^= c.*; b.* = (b.* << 12) | (b.* >> 20);
+    a.* +%= b.*; d.* ^= a.*; d.* = (d.* << 8) | (d.* >> 24);
+    c.* +%= d.*; b.* ^= c.*; b.* = (b.* << 7) | (b.* >> 25);
+}
+
+fn chacha20Block(key: *const [32]u8, counter: u32, nonce: *const [12]u8, out: *[64]u8) void {
+    var s: [16]u32 = undefined;
+    s[0] = 0x61707865; s[1] = 0x3320646e; s[2] = 0x79622d32; s[3] = 0x6b206574;
+    for (0..8) |i| {
+        s[4 + i] = (@as(u32, key[4*i]) << 0) | (@as(u32, key[4*i+1]) << 8) |
+                   (@as(u32, key[4*i+2]) << 16) | (@as(u32, key[4*i+3]) << 24);
+    }
+    s[12] = counter;
+    for (0..3) |i| {
+        s[13 + i] = (@as(u32, nonce[4*i]) << 0) | (@as(u32, nonce[4*i+1]) << 8) |
+                     (@as(u32, nonce[4*i+2]) << 16) | (@as(u32, nonce[4*i+3]) << 24);
+    }
+    var w: [16]u32 = undefined;
+    @memcpy(&w, &s);
+    for (0..10) |_| {
+        chacha20QuarterRound(&w[0], &w[4], &w[8], &w[12]);
+        chacha20QuarterRound(&w[1], &w[5], &w[9], &w[13]);
+        chacha20QuarterRound(&w[2], &w[6], &w[10], &w[14]);
+        chacha20QuarterRound(&w[3], &w[7], &w[11], &w[15]);
+        chacha20QuarterRound(&w[0], &w[5], &w[10], &w[15]);
+        chacha20QuarterRound(&w[1], &w[6], &w[11], &w[12]);
+        chacha20QuarterRound(&w[2], &w[7], &w[8], &w[13]);
+        chacha20QuarterRound(&w[3], &w[4], &w[9], &w[14]);
+    }
+    for (0..16) |i| {
+        w[i] +%= s[i];
+        out[4*i+0] = @as(u8, @truncate(w[i]));
+        out[4*i+1] = @as(u8, @truncate(w[i] >> 8));
+        out[4*i+2] = @as(u8, @truncate(w[i] >> 16));
+        out[4*i+3] = @as(u8, @truncate(w[i] >> 24));
+    }
+}
+
+fn chacha20Xor(key: *const [32]u8, nonce: *const [12]u8, data: []const u8, out: []u8) void {
+    var counter: u32 = 0;
+    var off: usize = 0;
+    while (off < data.len) : (counter += 1) {
+        var block: [64]u8 = undefined;
+        chacha20Block(key, counter, nonce, &block);
+        const chunk = @min(64, data.len - off);
+        for (0..chunk) |i| out[off + i] = data[off + i] ^ block[i];
+        off += chunk;
+    }
+}
+
+// ============================== Poly1305 ==============================
+
+const Poly1305 = struct {
+    acc: [5]u64 = .{0} ** 5,
+    r: [5]u64 = .{0} ** 5,
+    s: [16]u8 = .{0} ** 16,
+    buf: [16]u8 = .{0} ** 16,
+    buflen: usize = 0,
+    final: bool = false,
+
+    fn init(key: *const [32]u8) Poly1305 {
+        var p = Poly1305{};
+        @memcpy(p.s[0..16], key[16..32]);
+        var clamp_key: [16]u8 = undefined;
+        @memcpy(clamp_key[0..16], key[0..16]);
+        clamp_key[3] &= 15; clamp_key[7] &= 15; clamp_key[11] &= 15; clamp_key[15] &= 15;
+        clamp_key[4] &= 252; clamp_key[8] &= 252; clamp_key[12] &= 252;
+        p.r[0] = (@as(u64, clamp_key[0]) << 0) | (@as(u64, clamp_key[1]) << 8) | (@as(u64, clamp_key[2]) << 16) | (@as(u64, clamp_key[3]) << 24);
+        p.r[1] = (@as(u64, clamp_key[4]) >> 20) | (@as(u64, clamp_key[5]) << 12) | (@as(u64, clamp_key[6]) << 20) | (@as(u64, clamp_key[7]) << 28);
+        p.r[2] = (@as(u64, clamp_key[8]) >> 8) | (@as(u64, clamp_key[9]) << 24) | (@as(u64, clamp_key[10]) << 32) | (@as(u64, clamp_key[11]) << 40);
+        p.r[3] = (@as(u64, clamp_key[12]) >> 44) | (@as(u64, clamp_key[13]) << 20) | (@as(u64, clamp_key[14]) << 28) | (@as(u64, clamp_key[15]) << 36);
+        p.r[4] = (@as(u64, clamp_key[12]) >> 18) | (@as(u64, clamp_key[13]) << 6) | (@as(u64, clamp_key[14]) << 14) | (@as(u64, clamp_key[15]) << 22);
+        p.r[0] &= 0x0FFFFFFFFFFFFA;
+        p.r[1] &= 0x0FFFFFFFFFFFFC;
+        p.r[2] &= 0x0FFFFFFFFFFFFC;
+        p.r[3] &= 0x0FFFFFFFFFFFFC;
+        p.r[4] &= 0x0FFFFFFFFFFFFC;
+        return p;
+    }
+
+    fn add(self: *Poly1305, data: []const u8) void {
+        var off: usize = 0;
+        while (off < data.len) {
+            const space = 16 - self.buflen;
+            const take = @min(space, data.len - off);
+            @memcpy(self.buf[self.buflen..][0..take], data[off..][0..take]);
+            self.buflen += take;
+            off += take;
+            if (self.buflen == 16) {
+                self.block();
+                self.buflen = 0;
+            }
+        }
+    }
+
+    fn block(self: *Poly1305) void {
+        var n: [5]u64 = undefined;
+        n[0] = (@as(u64, self.buf[0]) << 0) | (@as(u64, self.buf[1]) << 8) | (@as(u64, self.buf[2]) << 16) | (@as(u64, self.buf[3]) << 26);
+        n[1] = (@as(u64, self.buf[3]) >> 6) | (@as(u64, self.buf[4]) << 2) | (@as(u64, self.buf[5]) << 10) | (@as(u64, self.buf[6]) << 18) | (@as(u64, self.buf[7]) << 26);
+        n[2] = (@as(u64, self.buf[7]) >> 6) | (@as(u64, self.buf[8]) << 2) | (@as(u64, self.buf[9]) << 10) | (@as(u64, self.buf[10]) << 18) | (@as(u64, self.buf[11]) << 26);
+        n[3] = (@as(u64, self.buf[11]) >> 6) | (@as(u64, self.buf[12]) << 2) | (@as(u64, self.buf[13]) << 10) | (@as(u64, self.buf[14]) << 18) | (@as(u64, self.buf[15]) << 26);
+        n[4] = (@as(u64, self.buf[15]) >> 6) | (@as(u64, 1) << 24);
+        var c: u128 = 0;
+        for (0..5) |i| {
+            c += @as(u128, self.acc[i]) + @as(u128, n[i]) * @as(u128, self.r[i]);
+            self.acc[i] = @as(u64, @truncate(c));
+            c >>= 52;
+        }
+        // Carry propagation
+        if (c > 0) {
+            self.acc[0] += @as(u64, @truncate(c * 5));
+            c = 0;
+            // Re-normalize
+            for (0..4) |i| {
+                self.acc[i+1] += (self.acc[i] >> 52);
+                self.acc[i] &= 0x0FFFFFFFFFFFFFFF;
+            }
+        }
+        // Normalize limbs
+        for (0..4) |i| {
+            const carry = self.acc[i] >> 52;
+            self.acc[i] &= 0x0FFFFFFFFFFFFFFF;
+            self.acc[i+1] += carry;
+        }
+    }
+
+    fn finish(self: *Poly1305, out: *[16]u8) void {
+        if (self.buflen > 0) {
+            self.buf[self.buflen] = 1;
+            var j: usize = self.buflen + 1;
+            while (j < 16) : (j += 1) self.buf[j] = 0;
+            self.block();
+        }
+        // acc mod (2^130 - 5)
+        var tmp: [5]u64 = undefined;
+        @memcpy(&tmp, &self.acc);
+        // Subtract p repeatedly
+        const p0: u64 = 0x0FFFFFFFFFFFFFFA;
+        const p1: u64 = 0x0FFFFFFFFFFFFFFF;
+        const p2: u64 = 0x0FFFFFFFFFFFFFFF;
+        const p3: u64 = 0x0FFFFFFFFFFFFFFF;
+        const p4: u64 = 0x0FFFFFFFFFFFFFFF;
+        var borrow: u64 = 0;
+        for (0..4) |_| {
+            var tmp2: [5]u64 = undefined;
+            @memcpy(&tmp2, &tmp);
+            var b2: u64 = 0;
+            const s_0 = tmp2[0] -% p0 -% b2; b2 = if (s_0 > tmp2[0]) 1 else 0;
+            const s_1 = tmp2[1] -% p1 -% b2; b2 = if (s_1 > tmp2[1]) 1 else 0;
+            const s_2 = tmp2[2] -% p2 -% b2; b2 = if (s_2 > tmp2[2]) 1 else 0;
+            const s_3 = tmp2[3] -% p3 -% b2; b2 = if (s_3 > tmp2[3]) 1 else 0;
+            const s_4 = tmp2[4] -% p4 -% b2;
+            if (borrow == 0) {
+                var cmp: i8 = 0;
+                if (tmp[4] > p4) cmp = 1
+                else if (tmp[4] < p4) cmp = -1
+                else if (tmp[3] > p3) cmp = 1
+                else if (tmp[3] < p3) cmp = -1
+                else if (tmp[2] > p2) cmp = 1
+                else if (tmp[2] < p2) cmp = -1
+                else if (tmp[1] > p1) cmp = 1
+                else if (tmp[1] < p1) cmp = -1
+                else if (tmp[0] > p0) cmp = 1
+                else if (tmp[0] < p0) cmp = -1;
+                if (cmp >= 0) {
+                    tmp[0] = s_0; tmp[1] = s_1; tmp[2] = s_2; tmp[3] = s_3; tmp[4] = s_4;
+                }
+            }
+            borrow = 1;
+        }
+        for (0..5) |i| self.acc[i] = tmp[i];
+        // Convert to 128-bit LE and add s (mod 2^128)
+        const lo = self.acc[0] | ((self.acc[1] & 0xFFF) << 52);
+        const hi = (self.acc[1] >> 12) | ((self.acc[2] & 0xFFFFFF) << 40);
+        var raw: [16]u8 = undefined;
+        for (0..8) |i| {
+            raw[i] = @as(u8, @truncate(lo >> @as(u6, @intCast(i * 8))));
+            raw[8+i] = @as(u8, @truncate(hi >> @as(u6, @intCast(i * 8))));
+        }
+        var carry: u16 = 0;
+        for (0..16) |i| {
+            const sum = @as(u16, raw[i]) + @as(u16, self.s[i]) + carry;
+            out[i] = @as(u8, @truncate(sum));
+            carry = sum >> 8;
+        }
+    }
+};
+
+pub fn chacha20Poly1305Encrypt(key: *const [32]u8, nonce: *const [12]u8, aad: []const u8, plaintext: []const u8, ciphertext: []u8, tag: *[16]u8) void {
+    var otk: [32]u8 = undefined;
+    var zero_block: [64]u8 = undefined;
+    chacha20Block(key, 0, nonce, &zero_block);
+    @memcpy(otk[0..32], zero_block[0..32]);
+    var poly_key: [32]u8 = undefined;
+    @memcpy(poly_key[0..32], zero_block[0..32]);
+    chacha20Xor(key, nonce, plaintext, ciphertext);
+    var poly = Poly1305.init(&poly_key);
+    poly.add(aad);
+    // Pad AAD to 16 bytes
+    if (aad.len % 16 != 0) {
+        var pad: [16]u8 = .{0} ** 16;
+        poly.add(pad[0..(16 - aad.len % 16)]);
+    }
+    poly.add(ciphertext[0..plaintext.len]);
+    if (plaintext.len % 16 != 0) {
+        var pad: [16]u8 = .{0} ** 16;
+        poly.add(pad[0..(16 - plaintext.len % 16)]);
+    }
+    // Length block
+    var len_block: [16]u8 = undefined;
+    for (0..8) |i| len_block[i] = @as(u8, @truncate(@as(u64, aad.len) >> @as(u6, @intCast((7-i)*8))));
+    for (0..8) |i| len_block[8+i] = @as(u8, @truncate(@as(u64, plaintext.len) >> @as(u6, @intCast((7-i)*8))));
+    poly.add(&len_block);
+    poly.finish(tag);
+}
+
+pub fn chacha20Poly1305Decrypt(key: *const [32]u8, nonce: *const [12]u8, aad: []const u8, ciphertext: []const u8, tag: *const [16]u8, plaintext: []u8) bool {
+    var computed_tag: [16]u8 = undefined;
+    // Compute Poly1305 tag over the ciphertext (without XORing)
+    var zero_block: [64]u8 = undefined;
+    chacha20Block(key, 0, nonce, &zero_block);
+    var poly_key: [32]u8 = undefined;
+    @memcpy(poly_key[0..32], zero_block[0..32]);
+    var poly = Poly1305.init(&poly_key);
+    poly.add(aad);
+    if (aad.len % 16 != 0) {
+        var pad: [16]u8 = .{0} ** 16;
+        poly.add(pad[0..(16 - aad.len % 16)]);
+    }
+    poly.add(ciphertext);
+    if (ciphertext.len % 16 != 0) {
+        var pad: [16]u8 = .{0} ** 16;
+        poly.add(pad[0..(16 - ciphertext.len % 16)]);
+    }
+    var len_block: [16]u8 = undefined;
+    for (0..8) |i| len_block[i] = @as(u8, @truncate(@as(u64, aad.len) >> @as(u6, @intCast((7-i)*8))));
+    for (0..8) |i| len_block[8+i] = @as(u8, @truncate(@as(u64, ciphertext.len) >> @as(u6, @intCast((7-i)*8))));
+    poly.add(&len_block);
+    poly.finish(&computed_tag);
+
+    // Constant-time tag comparison
+    var ok = true;
+    for (0..16) |i| { if (computed_tag[i] != tag[i]) ok = false; }
+    if (!ok) return false;
+
+    // Decrypt: XOR ciphertext with keystream
+    chacha20Xor(key, nonce, ciphertext, plaintext);
+    return true;
+}
+
+// ============================== SHA-384 ==============================
+
+const K64 = [_]u64{
+    0x428a2f98d728ae22, 0x7137449123ef65cd, 0xb5c0fbcfec4d3b2f, 0xe9b5dba58189dbbc,
+    0x3956c25bf348b538, 0x59f111f1b605d019, 0x923f82a4af194f9b, 0xab1c5ed5da6d8118,
+    0xd807aa98a3030242, 0x12835b0145706fbe, 0x243185be4ee4b28c, 0x550c7dc3d5ffb4e2,
+    0x72be5d74f27b896f, 0x80deb1fe3b1696b1, 0x9bdc06a725c71235, 0xc19bf174cf692694,
+    0xe49b69c19ef14ad2, 0xefbe4786384f25e3, 0x0fc19dc68b8cd5b5, 0x240ca1cc77ac9c65,
+    0x2de92c6f592b0275, 0x4a7484aa6ea6e483, 0x5cb0a9dcbd41fbd4, 0x76f988da831153b5,
+    0x983e5152ee66dfab, 0xa831c66d2db43210, 0xb00327c898fb213f, 0xbf597fc7beef0ee4,
+    0xc6e00bf33da88fc2, 0xd5a79147930aa725, 0x06ca6351e003826f, 0x142929670a0e6e70,
+    0x27b70a8546d22ffc, 0x2e1b21385c26c926, 0x4d2c6dfc5ac42aed, 0x53380d139d95b3df,
+    0x650a73548baf63de, 0x766a0abb3c77b2a8, 0x81c2c92e47edaee6, 0x92722c851482353b,
+    0xa2bfe8a14cf10364, 0xa81a664bbc423001, 0xc24b8b70d0f89791, 0xc76c51a30654be30,
+    0xd192e819d6ef5218, 0xd69906245565a910, 0xf40e35855771202a, 0x106aa07032bbd1b8,
+    0x19a4c116b8d2d0c8, 0x1e376c085141ab53, 0x2748774cdf8eeb99, 0x34b0bcb5e19b48a8,
+    0x391c0cb3c5c95a63, 0x4ed8aa4ae3418acb, 0x5b9cca4f7763e373, 0x682e6ff3d6b2b8a3,
+    0x748f82ee5defb2fc, 0x78a5636f43172f60, 0x84c87814a1f0ab72, 0x8cc702081a6439ec,
+    0x90befffa23631e28, 0xa4506cebde82bde9, 0xbef9a3f7b2c67915, 0xc67178f2e372532b,
+};
+
+fn rotR64(x: u64, n: u64) u64 { return (x >> @as(u6, @intCast(n))) | (x << @as(u6, @intCast(64 - n))); }
+fn ch64(x: u64, y: u64, z: u64) u64 { return (x & y) ^ ((~x) & z); }
+fn maj64(x: u64, y: u64, z: u64) u64 { return (x & y) ^ (x & z) ^ (y & z); }
+fn s0_64(x: u64) u64 { return rotR64(x, 28) ^ rotR64(x, 34) ^ rotR64(x, 39); }
+fn s1_64(x: u64) u64 { return rotR64(x, 14) ^ rotR64(x, 18) ^ rotR64(x, 41); }
+fn w0_64(x: u64) u64 { return rotR64(x, 1) ^ rotR64(x, 8) ^ (x >> 7); }
+fn w1_64(x: u64) u64 { return rotR64(x, 19) ^ rotR64(x, 61) ^ (x >> 6); }
+
+fn w64be(buf: []u8, pos: usize, v: u64) void {
+    buf[pos+0] = @as(u8, @truncate(v >> 56));
+    buf[pos+1] = @as(u8, @truncate(v >> 48));
+    buf[pos+2] = @as(u8, @truncate(v >> 40));
+    buf[pos+3] = @as(u8, @truncate(v >> 32));
+    buf[pos+4] = @as(u8, @truncate(v >> 24));
+    buf[pos+5] = @as(u8, @truncate(v >> 16));
+    buf[pos+6] = @as(u8, @truncate(v >> 8));
+    buf[pos+7] = @as(u8, @truncate(v));
+}
+
+fn r64be(buf: []const u8, pos: usize) u64 {
+    return (@as(u64, buf[pos]) << 56) | (@as(u64, buf[pos+1]) << 48) | (@as(u64, buf[pos+2]) << 40) |
+           (@as(u64, buf[pos+3]) << 32) | (@as(u64, buf[pos+4]) << 24) | (@as(u64, buf[pos+5]) << 16) |
+           (@as(u64, buf[pos+6]) << 8) | @as(u64, buf[pos+7]);
+}
+
+pub fn sha384(data: []const u8, out: *[48]u8) void {
+    var h: [8]u64 = [8]u64{
+        0xcbbb9d5dc1059ed8, 0x629a292a367cd507, 0x9159015a3070dd17, 0x152fecd8f70e5939,
+        0x67332667ffc00b31, 0x8eb44a8768581511, 0xdb0c2e0d64f98fa7, 0x47b5481dbefa4fa4,
+    };
+    const bit_len: u128 = @as(u128, data.len) * 8;
+    var buf: [128]u8 = undefined;
+    var i: usize = 0;
+    while (i < data.len) {
+        const chunk_end = @min(i + 128, data.len);
+        const chunk_len = chunk_end - i;
+        if (chunk_len == 128) {
+            sha384Block(&h, data[i..][0..128]);
+            i += 128;
+        } else {
+            @memcpy(buf[0..chunk_len], data[i..][0..chunk_len]);
+            buf[chunk_len] = 0x80;
+            var j: usize = chunk_len + 1;
+            while (j < 112) { buf[j] = 0; j += 1; }
+            if (chunk_len >= 112) {
+                while (j < 128) { buf[j] = 0; j += 1; }
+                sha384Block(&h, &buf);
+                j = 0;
+                while (j < 112) { buf[j] = 0; j += 1; }
+            }
+            w64be(&buf, 112, @as(u64, @truncate(bit_len >> 64)));
+            w64be(&buf, 120, @as(u64, @truncate(bit_len)));
+            sha384Block(&h, &buf);
+            break;
+        }
+    }
+    if (data.len % 128 == 0) {
+        var j: usize = 0;
+        while (j < 112) { buf[j] = 0; j += 1; }
+        buf[0] = 0x80;
+        w64be(&buf, 112, @as(u64, @truncate(bit_len >> 64)));
+        w64be(&buf, 120, @as(u64, @truncate(bit_len)));
+        sha384Block(&h, &buf);
+    }
+    for (h[0..6], 0..) |hv, idx| w64be(out, idx * 8, hv);
+}
+
+fn sha384Block(h: *[8]u64, block: *const [128]u8) void {
+    var w: [80]u64 = undefined;
+    for (0..16) |t| w[t] = r64be(block, t * 8);
+    for (16..80) |t| w[t] = w1_64(w[t-2]) +% w[t-7] +% w0_64(w[t-15]) +% w[t-16];
+    var a = h[0]; var b = h[1]; var c = h[2]; var d = h[3];
+    var e = h[4]; var f = h[5]; var g = h[6]; var hh = h[7];
+    for (0..80) |t| {
+        const t1 = hh +% s1_64(e) +% ch64(e, f, g) +% K64[t] +% w[t];
+        const t2 = s0_64(a) +% maj64(a, b, c);
+        hh = g; g = f; f = e; e = d +% t1; d = c; c = b; b = a; a = t1 +% t2;
+    }
+    h[0] +%= a; h[1] +%= b; h[2] +%= c; h[3] +%= d;
+    h[4] +%= e; h[5] +%= f; h[6] +%= g; h[7] +%= hh;
+}
+
+// ============================== AES-256 Key Schedule ==============================
+
+pub fn aes256KeySchedule(key: *const [32]u8, out: *[240]u8) void {
+    var w: [60]u32 = undefined;
+    var i: usize = 0;
+    while (i < 8) : (i += 1) {
+        w[i] = (@as(u32, key[4*i]) << 24) | (@as(u32, key[4*i+1]) << 16) |
+               (@as(u32, key[4*i+2]) << 8) | @as(u32, key[4*i+3]);
+    }
+    while (i < 60) : (i += 1) {
+        var tmp = w[i-1];
+        if (i % 8 == 0) tmp = aesSubWord(aesRotWord(tmp)) ^ (AES_RCON[i / 8] << 24)
+        else if (i % 8 == 4) tmp = aesSubWord(tmp);
+        w[i] = w[i-8] ^ tmp;
+    }
+    for (0..60) |j| {
+        out[j*4+0] = @as(u8, @truncate(w[j] >> 24));
+        out[j*4+1] = @as(u8, @truncate(w[j] >> 16));
+        out[j*4+2] = @as(u8, @truncate(w[j] >> 8));
+        out[j*4+3] = @as(u8, @truncate(w[j]));
+    }
+}
+
+pub fn aes256Encrypt(plaintext: *const [16]u8, key_schedule: *const [240]u8, ciphertext: *[16]u8) void {
+    var state: [16]u8 = undefined;
+    @memcpy(state[0..16], plaintext[0..16]);
+    aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(key_schedule)));
+    var round: usize = 1;
+    while (round < 14) : (round += 1) {
+        aesSubBytes(&state);
+        aesShiftRows(&state);
+        aesMixColumns(&state);
+        aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(@as([*]const u8, @ptrCast(key_schedule)) + round * 16)));
+    }
+    aesSubBytes(&state);
+    aesShiftRows(&state);
+    aesAddRoundKey(&state, @as(*const [16]u8, @ptrCast(@as([*]const u8, @ptrCast(key_schedule)) + 14 * 16)));
+    @memcpy(ciphertext[0..16], &state);
+}
+
+// ============================== GCM with AES-256 ==============================
+
+fn gcmInit256(key: *const [32]u8, nonce: *const [12]u8, h: *[16]u8, j0: *[16]u8, icb: *[16]u8) [240]u8 {
+    var ks: [240]u8 = undefined;
+    aes256KeySchedule(key, &ks);
+    var zero: [16]u8 = [_]u8{0} ** 16;
+    aes256Encrypt(&zero, &ks, h);
+    @memcpy(j0[0..12], nonce[0..12]);
+    j0[12] = 0; j0[13] = 0; j0[14] = 0; j0[15] = 1;
+    @memcpy(icb[0..16], j0[0..16]);
+    gcmInc32(icb);
+    return ks;
+}
+
+fn gcmGctr256(out: []u8, key_schedule: *const [240]u8, icb: *const [16]u8, data: []const u8) void {
+    var counter: [16]u8 = undefined;
+    @memcpy(counter[0..16], icb[0..16]);
+    var off: usize = 0;
+    while (off < data.len) {
+        var encrypted: [16]u8 = undefined;
+        aes256Encrypt(&counter, key_schedule, &encrypted);
+        const chunk = @min(16, data.len - off);
+        for (0..chunk) |i| out[off + i] = data[off + i] ^ encrypted[i];
+        off += chunk;
+        gcmInc32(&counter);
+    }
+}
+
+pub fn gcmEncrypt256(key: *const [32]u8, nonce: *const [12]u8, aad: []const u8, plaintext: []const u8, ciphertext: []u8, tag: *[16]u8) void {
+    var h: [16]u8 = undefined;
+    var j0: [16]u8 = undefined;
+    var icb: [16]u8 = undefined;
+    const ks = gcmInit256(key, nonce, &h, &j0, &icb);
+    gcmGctr256(ciphertext, &ks, &icb, plaintext);
+    var ghash_out: [16]u8 = undefined;
+    gcmGhash(&ghash_out, &h, aad, ciphertext[0..plaintext.len]);
+    var tag_block: [16]u8 = undefined;
+    aes256Encrypt(&j0, &ks, &tag_block);
+    gcmXor(tag, &ghash_out, &tag_block);
+}
+
+pub fn gcmDecrypt256(key: *const [32]u8, nonce: *const [12]u8, aad: []const u8, ciphertext: []const u8, tag: *const [16]u8, plaintext: []u8) bool {
+    var h: [16]u8 = undefined;
+    var j0: [16]u8 = undefined;
+    var icb: [16]u8 = undefined;
+    const ks = gcmInit256(key, nonce, &h, &j0, &icb);
+    var ghash_out: [16]u8 = undefined;
+    gcmGhash(&ghash_out, &h, aad, ciphertext);
+    var tag_block: [16]u8 = undefined;
+    aes256Encrypt(&j0, &ks, &tag_block);
+    var expected_tag: [16]u8 = undefined;
+    gcmXor(&expected_tag, &ghash_out, &tag_block);
+    var ok = true;
+    for (0..16) |i| { if (expected_tag[i] != tag[i]) ok = false; }
+    if (!ok) return false;
+    gcmInc32(&j0);
+    gcmGctr256(plaintext, &ks, &j0, ciphertext);
+    return true;
 }
 
 // ============================== HMAC-SHA256 ==============================
