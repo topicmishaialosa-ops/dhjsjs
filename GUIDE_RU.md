@@ -1528,6 +1528,8 @@ dhjsjs_cc build app.dhjsjs -o app
 | `raw` | сырой ARM64-код без ELF-обёртки |
 | `riscv32` | ELF32 RISC-V |
 | `esp32`, `esp32c3` | alias для `riscv32` |
+| `avr` | Intel HEX для Arduino (ATmega328p) |
+| `arduino`, `uno`, `nano`, `mega` | alias для `avr` |
 | `windows`, `win`, `exe` | PE64 Windows x86-64 |
 | `apk`, `android` | Android APK с ARM64 `.so` |
 
@@ -1566,10 +1568,15 @@ dhjsjs_cc transpile app.dhjsjs -o app.c
 ### flash
 
 ```
+# ESP32 (RISC-V): сборка + прошивка
 dhjsjs_cc flash app.dhjsjs --target esp32 --port /dev/ttyUSB0
+
+# AVR (Arduino): только сборка в .hex, прошивка через avrdude
+dhjsjs_cc build app.dhjsjs --target avr -o firmware.hex
+avrdude -p atmega328p -c arduino -P /dev/ttyUSB0 -b 115200 -U flash:w:firmware.hex
 ```
 
-Команда собирает RISC-V ELF и передаёт его в прошивальщик ESP. Сейчас `flash` рассчитан на `riscv32`/`esp32`.
+Команда `flash` собирает и прошивает ESP32 (RISC-V) через встроенный протокол esptool. Для AVR генерируется Intel HEX для прошивки через avrdude.
 
 ### APK flags
 

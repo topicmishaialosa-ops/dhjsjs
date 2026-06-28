@@ -5,6 +5,8 @@ const compiler_arm = @import("compiler_arm.zig");
 const codegen_mod = @import("codegen.zig");
 const codegen_arm = @import("codegen_arm.zig");
 const codegen_rv = @import("codegen_rv.zig");
+const compiler_avr = @import("compiler_avr.zig");
+const codegen_avr = @import("codegen_avr.zig");
 const crypto = @import("crypto.zig");
 const sys = @import("sys.zig");
 const utils = @import("utils.zig");
@@ -17,7 +19,7 @@ const gui_srv = @import("gui_srv.zig");
 const http_client = @import("http_client.zig");
 const tls_client = @import("tls_client.zig");
 
-const Target = enum { x86_64, aarch64, riscv32, apk, raw, native, windows };
+const Target = enum { x86_64, aarch64, riscv32, avr, apk, raw, native, windows };
 
 fn hostTarget() Target {
     var buf: [390]u8 = @splat(0);
@@ -78,6 +80,7 @@ fn parseTarget(s: []const u8) ?Target {
     if (strEql(s, "raw")) return .raw;
     if (strEql(s, "native")) return .native;
     if (strEql(s, "riscv32") or strEql(s, "esp32") or strEql(s, "esp32c3")) return .riscv32;
+    if (strEql(s, "avr") or strEql(s, "arduino") or strEql(s, "uno") or strEql(s, "nano") or strEql(s, "mega")) return .avr;
     if (strEql(s, "apk") or strEql(s, "android")) return .apk;
     if (strEql(s, "windows") or strEql(s, "win") or strEql(s, "exe")) return .windows;
     return null;
@@ -108,6 +111,11 @@ fn compileSource(src: []const u8, target: Target, out_path: []const u8) bool {
         .riscv32 => {
             var cb = compiler_rv.compile(prog, &parser.pool);
             cb.buildElf32();
+            if (!writeFile(out_path, cb.get())) return false;
+        },
+        .avr => {
+            var cb = compiler_avr.compile(prog, &parser.pool);
+            cb.buildHex(0);
             if (!writeFile(out_path, cb.get())) return false;
         },
         .apk => {
@@ -444,6 +452,8 @@ fn cmdHelp() void {
         \\  riscv32  - RISC-V 32-bit (ESP32-C3/C6)
         \\  esp32    - alias for riscv32
         \\  esp32c3  - alias for riscv32
+        \\  avr      - AVR 8-bit (Arduino Uno/Nano/Mega)
+        \\  arduino  - alias for avr
         \\  windows  - Windows x86_64 (.exe)
         \\  native   - auto-detect host architecture (default)
         \\  apk      - Android APK (aarch64)
@@ -688,12 +698,22 @@ fn cmdFlash(args: []const []const u8) void {
         else if (strEql(a, "--port")) { i += 1; if (i < args.len) port = args[i]; }
         else if (a.len > 0 and a[0] != '-') src_file = a;
     }
-    if (target != .riscv32) { sys.writeStr(2, "error: flash only supports riscv32/esp32 targets\n", 50); sys.exit(1); }
+    if (target != .riscv32 and target != .avr) { sys.writeStr(2, "error: flash only supports riscv32/esp32 and avr/arduino targets\n", 63); sys.exit(1); }
     var buf: [BUFSIZE]u8 = undefined;
     const src = readFile(src_file, buf[0..]) orelse { sys.writeStr(2, "error: cannot read '", 20); sys.writeStr(2, src_file.ptr, src_file.len); sys.writeStr(2, "'\n", 2); sys.exit(1); };
-    const elf_path = "/tmp/dhjsjs_flash.elf\x00";
-    if (!compileSource(src, target, elf_path[0..elf_path.len - 1])) { sys.writeStr(2, "error: compilation failed\n", 26); sys.exit(1); }
-    if (!esp.flashElf(port, elf_path[0 .. elf_path.len - 1 :0])) sys.exit(1);
+    const hex_path = "/tmp/dhjsjs_flash.hex\x00";
+    if (!compileSource(src, target, hex_path[0..hex_path.len - 1])) { sys.writeStr(2, "error: compilation failed\n", 26); sys.exit(1); }
+    if (target == .riscv32) {
+        if (!esp.flashElf(port, hex_path[0 .. hex_path.len - 1 :0])) sys.exit(1);
+    } else if (target == .avr) {
+        sys.writeStr(1, "wrote hex: ", 11);
+        sys.writeStr(1, hex_path[0..hex_path.len - 1].ptr, hex_path.len - 1);
+        sys.writeStr(1, "\nflash with: avrdude -p atmega328p -c arduino -P ", 49);
+        sys.writeStr(1, port.ptr, port.len);
+        sys.writeStr(1, " -b 115200 -U flash:w:", 22);
+        sys.writeStr(1, hex_path[0..hex_path.len - 1].ptr, hex_path.len - 1);
+        sys.writeStr(1, "\n", 1);
+    }
 }
 
 pub fn main() void {

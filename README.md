@@ -122,7 +122,7 @@ syntaxes/
 
 Большой размер обусловлен тем, что Zig 0.16 не умеет выкидывать неиспользуемый код из корневой точки входа при `build-exe` без `std`. Оптимизация размера — в планах.
 
-## Кросс-компиляция: RISC-V 32 и ARM64
+## Кросс-компиляция: RISC-V 32, ARM64 и AVR
 
 Генерация кода для нескольких архитектур из одного исходника:
 
@@ -131,12 +131,14 @@ syntaxes/
 | x86_64 | ELF64 | Десктоп, сервер |
 | aarch64 | ELF64 | Raspberry Pi, Apple Silicon |
 | riscv32 | ELF32 | ESP32-C3, ESP32-C6 |
+| avr | Intel HEX | Arduino Uno/Nano/Mega (ATmega) |
 
 Примеры сборки:
 
 ```bash
 ./dhjsjs_cc build app.dhjsjs --target riscv32
 ./dhjsjs_cc build app.dhjsjs --target aarch64
+./dhjsjs_cc build app.dhjsjs --target avr -o firmware.hex
 ```
 
 ## Команда flash (ESP32)

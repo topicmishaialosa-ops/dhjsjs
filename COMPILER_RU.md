@@ -707,6 +707,64 @@ end_label:
 
 ---
 
+## 8.1. AVR бэкенд (compiler_avr.zig)
+
+### Назначение
+
+`compiler_avr.zig` (460 строк) — компилятор для AVR 8-bit. Используется для Arduino Uno/Nano/Mega (ATmega328p, ATmega2560 и других).
+
+### Архитектура
+
+- 8-битные регистры (r0-r31), 32 регистра
+- r1 = zero (всегда 0)
+- r28:r29 = Y (frame pointer)
+- r30:r31 = Z (адресный регистр)
+- r22-r25 = A0 (32-битный аккумулятор для выражений)
+- r18-r21 = T0 (временный для бинарных операций)
+
+### Переменные и стек
+
+Все переменные хранятся на стеке, доступ через Y+offset. Для offset 0-63 используется прямая адресация через `ldd`/`std`. Для больших смещений — через MOVW + ADD/ADC с Z-регистром.
+
+### 32-битные операции
+
+32-битные целые реализованы через последовательность 8-битных инструкций с переносом:
+
+| Операция | Инструкции |
+|----------|-----------|
+| ADD | 1×add + 3×adc |
+| SUB | 1×sub + 3×sbc |
+| AND/OR/XOR | 4×and/or/eor |
+| NEG | neg + 3×sbc r, R1 |
+| Сравнение | cp + 3×cpc |
+| Сдвиг влево | 1×lsl + 3×rol |
+| Сдвиг вправо | 1×lsr + 3×ror |
+
+### Ветвление
+
+- `breq`/`brne` — равенство (Z-флаг из cp/cpc)
+- `brlt`/`brge` — signed сравнения
+- `brlo`/`brsh` — unsigned сравнения
+
+### Выходной формат
+
+- Intel HEX (.hex) — для прошивки через avrdude или Arduino IDE
+- Можно использовать `avrdude -p atmega328p -c arduino -P /dev/ttyUSB0 -b 115200 -U flash:w:file.hex`
+
+### syscall на AVR
+
+- `syscall(0, port, val)` — запись в I/O порт (OUT)
+- `syscall(1, port)` — чтение из I/O порта (IN)
+
+### Ограничения
+
+- Нет 32-битного умножения/деления (возвращают 0)
+- Строки не поддерживаются (возвращают 0)
+- Максимум 16 переменных в функции (ограничение LDD-диапазона 64 байта)
+- Только один `main()`, нет вызова пользовательских функций
+
+---
+
 ## 9. Типы данных и память
 
 ### Целые числа (int)
@@ -1595,16 +1653,19 @@ Optional Header:
 
 ---
 
-## 18. ESP32 и RISC-V
+## 18. Микроконтроллеры: ESP32 (RISC-V) и AVR (Arduino)
 
 ### Сборка и прошивка
 
 ```
-# Сборка
+# RISC-V (ESP32-C3/C6)
 dhjsjs_cc build app.dhjsjs --target riscv32
-
-# Сборка и прошивка
 dhjsjs_cc flash app.dhjsjs --target esp32 --port /dev/ttyUSB0
+
+# AVR (Arduino Uno/Nano/Mega)
+dhjsjs_cc build app.dhjsjs --target avr -o app.hex
+# прошивка через avrdude:
+# avrdude -p atmega328p -c arduino -P /dev/ttyUSB0 -b 115200 -U flash:w:app.hex
 ```
 
 ### esp.zig (291 строка) — ESP32 протокол прошивки
@@ -2065,7 +2126,8 @@ http.get("host", "/path")
 
 - Аудио только через OSS (`/dev/dsp`), не ALSA/PulseAudio
 - GUI только через pipe-протокол с gui_srv
-- ESP32: только RISC-V 32-bit, не Xtensa
+- ESP32-C3/C6: RISC-V 32-bit (ESP32, ESP32-S2/S3 с Xtensa — в разработке)
+- AVR: Arduino (ATmega, ATtiny) — базовая поддержка, без умножения/деления
 
 ---
 
@@ -2132,6 +2194,8 @@ http_client      — HTTP клиент (опционально, standalone)
 | `main.zig` | 336 | IDE точка входа |
 | `esp.zig` | 291 | ESP32 прошивка |
 | `codegen_rv.zig` | 271 | RISC-V кодогенератор |
+| `codegen_avr.zig` | 280 | AVR кодогенератор |
+| `compiler_avr.zig` | 460 | Компилятор AVR (Arduino) |
 | `desktop_gui.zig` | 255 | Демо GUI |
 | `tty.zig` | 254 | TTY интерфейс |
 | `win32.zig` | 248 | Win32 GDI |
