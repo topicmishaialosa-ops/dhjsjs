@@ -16,7 +16,7 @@ gui_srv: src/*.zig
 	zig build-exe src/gui_srv.zig --name gui_srv --cache-dir .zig-cache -lvulkan -lGL -lX11 -fPIC
 
 gl3_gui: src/*.zig
-	zig build-exe src/gl3_gui.zig --name gl3_gui --cache-dir .zig-cache -lGL -lX11 -fPIC
+	zig build-exe src/gl3_gui.zig --name gl3_gui --cache-dir .zig-cache -fPIC
 
 http_client: src/*.zig
 	zig build-exe src/http_client.zig --name http_client --cache-dir .zig-cache
@@ -35,7 +35,7 @@ release: src/*.zig
 	strip desktop_gui
 	zig build-exe src/gui_srv.zig --name gui_srv --cache-dir .zig-cache -Doptimize=ReleaseSafe -lvulkan -lGL -lX11 -fPIC
 	strip gui_srv
-	zig build-exe src/gl3_gui.zig --name gl3_gui --cache-dir .zig-cache -Doptimize=ReleaseSafe -lGL -lX11 -fPIC
+	zig build-exe src/gl3_gui.zig --name gl3_gui --cache-dir .zig-cache -Doptimize=ReleaseSafe -fPIC
 	strip gl3_gui
 	zig build-exe src/http_client.zig --name http_client --cache-dir .zig-cache -Doptimize=ReleaseSafe
 	strip http_client

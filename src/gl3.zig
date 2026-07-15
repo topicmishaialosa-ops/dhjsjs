@@ -1,44 +1,46 @@
 // ============================================================================
 // gl3.zig — OpenGL 3.3 Core Profile GPU renderer
-// X11 + GLX via extern declarations, zero runtime loading complexity
+// libX11.so + libGL.so loaded at runtime via elf_loader — ZERO link-time deps
 // ============================================================================
 
 const sys = @import("sys.zig");
+const elf = @import("elf_loader.zig");
 const font_mod = @import("font.zig");
 
 // ---------------------------------------------------------------------------
-// X11 extern declarations (same pattern as vk.zig)
+// X11 function pointers (loaded from libX11.so at runtime)
 // ---------------------------------------------------------------------------
-extern "X11" fn XOpenDisplay(name: ?[*:0]const u8) callconv(.c) ?*anyopaque;
-extern "X11" fn XDefaultScreen(dpy: *anyopaque) callconv(.c) i32;
-extern "X11" fn XDefaultRootWindow(dpy: *anyopaque) callconv(.c) u64;
-extern "X11" fn XDefaultVisual(dpy: *anyopaque, screen: i32) callconv(.c) ?*anyopaque;
-extern "X11" fn XDefaultColormap(dpy: *anyopaque, screen: i32) callconv(.c) u64;
-extern "X11" fn XCreateColormap(dpy: *anyopaque, win: u64, visual: ?*anyopaque, alloc: i32) callconv(.c) u64;
-extern "X11" fn XCreateWindow(dpy: *anyopaque, parent: u64, x: i32, y: i32, w: u32, h: u32, border: u32, depth: i32, class: u32, visual: ?*anyopaque, mask: u64, attrs: ?*anyopaque) callconv(.c) u64;
-extern "X11" fn XMapWindow(dpy: *anyopaque, win: u64) callconv(.c) i32;
-extern "X11" fn XStoreName(dpy: *anyopaque, win: u64, name: [*:0]const u8) callconv(.c) i32;
-extern "X11" fn XSelectInput(dpy: *anyopaque, win: u64, mask: i64) callconv(.c) i32;
-extern "X11" fn XNextEvent(dpy: *anyopaque, event: *anyopaque) callconv(.c) i32;
-extern "X11" fn XPending(dpy: *anyopaque) callconv(.c) i32;
-extern "X11" fn XCloseDisplay(dpy: *anyopaque) callconv(.c) i32;
-extern "X11" fn XDestroyWindow(dpy: *anyopaque, win: u64) callconv(.c) i32;
-extern "X11" fn XFlush(dpy: *anyopaque) callconv(.c) i32;
-extern "X11" fn XInternAtom(dpy: *anyopaque, name: [*:0]const u8, onlyIfExists: i32) callconv(.c) u64;
-extern "X11" fn XChangeProperty(dpy: *anyopaque, win: u64, prop: u64, typ: u64, fmt: i32, mode: i32, data: [*]const u8, nelements: i32) callconv(.c) i32;
-extern "X11" fn XSendEvent(dpy: *anyopaque, win: u64, propagate: i32, mask: i64, event: *anyopaque) callconv(.c) i32;
+var XOpenDisplay_: *const fn (?[*:0]const u8) callconv(.c) ?*anyopaque = undefined;
+var XDefaultScreen_: *const fn (*anyopaque) callconv(.c) i32 = undefined;
+var XDefaultRootWindow_: *const fn (*anyopaque) callconv(.c) u64 = undefined;
+var XDefaultVisual_: *const fn (*anyopaque, i32) callconv(.c) ?*anyopaque = undefined;
+var XCreateWindow_: *const fn (*anyopaque, u64, i32, i32, u32, u32, u32, i32, u32, ?*anyopaque, u64, ?*anyopaque) callconv(.c) u64 = undefined;
+var XMapWindow_: *const fn (*anyopaque, u64) callconv(.c) i32 = undefined;
+var XStoreName_: *const fn (*anyopaque, u64, [*:0]const u8) callconv(.c) i32 = undefined;
+var XSelectInput_: *const fn (*anyopaque, u64, i64) callconv(.c) i32 = undefined;
+var XNextEvent_: *const fn (*anyopaque, *anyopaque) callconv(.c) i32 = undefined;
+var XPending_: *const fn (*anyopaque) callconv(.c) i32 = undefined;
+var XCloseDisplay_: *const fn (*anyopaque) callconv(.c) i32 = undefined;
+var XDestroyWindow_: *const fn (*anyopaque, u64) callconv(.c) i32 = undefined;
+var XFlush_: *const fn (*anyopaque) callconv(.c) i32 = undefined;
+var XInternAtom_: *const fn (*anyopaque, [*:0]const u8, i32) callconv(.c) u64 = undefined;
+var XChangeProperty_: *const fn (*anyopaque, u64, u64, u64, i32, i32, [*]const u8, i32) callconv(.c) i32 = undefined;
 
 // ---------------------------------------------------------------------------
-// GLX extern declarations
+// GLX function pointers (loaded from libGL.so at runtime)
 // ---------------------------------------------------------------------------
-extern "GL" fn glXChooseFBConfig(dpy: *anyopaque, screen: i32, attrib_list: [*]const i32, nelements: *i32) callconv(.c) ?[*]u64;
-extern "GL" fn glXGetVisualFromFBConfig(dpy: *anyopaque, config: u64) callconv(.c) ?*XVisualInfo;
-extern "GL" fn glXCreateWindow(dpy: *anyopaque, config: u64, win: u64, attrib_list: ?[*]const i32) callconv(.c) u64;
-extern "GL" fn glXMakeCurrent(dpy: *anyopaque, drawable: u64, ctx: u64) callconv(.c) i32;
-extern "GL" fn glXSwapBuffers(dpy: *anyopaque, drawable: u64) callconv(.c) void;
-extern "GL" fn glXDestroyContext(dpy: *anyopaque, ctx: u64) callconv(.c) void;
-extern "GL" fn glXDestroyWindow(dpy: *anyopaque, win: u64) callconv(.c) void;
-extern "GL" fn glXGetProcAddress(name: [*:0]const u8) callconv(.c) ?*const anyopaque;
+var glXChooseFBConfig_: *const fn (*anyopaque, i32, [*]const i32, *i32) callconv(.c) ?[*]u64 = undefined;
+var glXGetVisualFromFBConfig_: *const fn (*anyopaque, u64) callconv(.c) ?*XVisualInfo = undefined;
+var glXCreateWindow_: *const fn (*anyopaque, u64, u64, ?[*]const i32) callconv(.c) u64 = undefined;
+var glXMakeCurrent_: *const fn (*anyopaque, u64, u64) callconv(.c) i32 = undefined;
+var glXSwapBuffers_: *const fn (*anyopaque, u64) callconv(.c) void = undefined;
+var glXDestroyContext_: *const fn (*anyopaque, u64) callconv(.c) void = undefined;
+var glXDestroyWindow_: *const fn (*anyopaque, u64) callconv(.c) void = undefined;
+var glXGetProcAddress_: *const fn ([*:0]const u8) callconv(.c) ?*const anyopaque = undefined;
+
+// glXCreateContextAttribsARB (loaded via glXGetProcAddress)
+const GlXCreateContextAttribsARB = *const fn (*anyopaque, u64, u64, i32, ?[*]const i32) callconv(.c) u64;
+var glXCreateContextAttribsARB_: ?GlXCreateContextAttribsARB = null;
 
 const XVisualInfo = extern struct {
     visual: ?*anyopaque,
@@ -54,10 +56,54 @@ const XVisualInfo = extern struct {
 };
 
 // ---------------------------------------------------------------------------
-// GLX_ARB_create_context (loaded via glXGetProcAddress)
+// GL function pointers (loaded from libGL.so via glXGetProcAddress)
 // ---------------------------------------------------------------------------
-const GlXCreateContextAttribsARB = *const fn (dpy: *anyopaque, config: u64, share: u64, direct: i32, attrib_list: ?[*]const i32) callconv(.c) u64;
-var glXCreateContextAttribsARB_: ?GlXCreateContextAttribsARB = null;
+var glViewport_: *const fn (i32, i32, i32, i32) callconv(.c) void = undefined;
+var glScissor_: *const fn (i32, i32, i32, i32) callconv(.c) void = undefined;
+var glEnable_: *const fn (u32) callconv(.c) void = undefined;
+var glDisable_: *const fn (u32) callconv(.c) void = undefined;
+var glBlendFunc_: *const fn (u32, u32) callconv(.c) void = undefined;
+var glClearColor_: *const fn (f32, f32, f32, f32) callconv(.c) void = undefined;
+var glClear_: *const fn (u32) callconv(.c) void = undefined;
+
+var glGenBuffers_: *const fn (i32, *u32) callconv(.c) void = undefined;
+var glBindBuffer_: *const fn (u32, u32) callconv(.c) void = undefined;
+var glBufferData_: *const fn (u32, isize, ?*const anyopaque, u32) callconv(.c) void = undefined;
+var glDeleteBuffers_: *const fn (i32, [*]const u32) callconv(.c) void = undefined;
+
+var glGenVertexArrays_: *const fn (i32, *u32) callconv(.c) void = undefined;
+var glBindVertexArray_: *const fn (u32) callconv(.c) void = undefined;
+var glDeleteVertexArrays_: *const fn (i32, [*]const u32) callconv(.c) void = undefined;
+var glEnableVertexAttribArray_: *const fn (u32) callconv(.c) void = undefined;
+var glDisableVertexAttribArray_: *const fn (u32) callconv(.c) void = undefined;
+var glVertexAttribPointer_: *const fn (u32, i32, u32, u8, i32, ?*const anyopaque) callconv(.c) void = undefined;
+
+var glGenTextures_: *const fn (i32, *u32) callconv(.c) void = undefined;
+var glBindTexture_: *const fn (u32, u32) callconv(.c) void = undefined;
+var glTexImage2D_: *const fn (u32, i32, i32, i32, i32, i32, u32, u32, ?*const anyopaque) callconv(.c) void = undefined;
+var glTexParameteri_: *const fn (u32, u32, i32) callconv(.c) void = undefined;
+var glDeleteTextures_: *const fn (i32, [*]const u32) callconv(.c) void = undefined;
+var glActiveTexture_: *const fn (u32) callconv(.c) void = undefined;
+
+var glCreateShader_: *const fn (u32) callconv(.c) u32 = undefined;
+var glShaderSource_: *const fn (u32, i32, *const [*:0]const u8, ?*const i32) callconv(.c) void = undefined;
+var glCompileShader_: *const fn (u32) callconv(.c) void = undefined;
+var glCreateProgram_: *const fn () callconv(.c) u32 = undefined;
+var glAttachShader_: *const fn (u32, u32) callconv(.c) void = undefined;
+var glLinkProgram_: *const fn (u32) callconv(.c) void = undefined;
+var glUseProgram_: *const fn (u32) callconv(.c) void = undefined;
+var glGetShaderiv_: *const fn (u32, u32, *i32) callconv(.c) void = undefined;
+var glGetProgramiv_: *const fn (u32, u32, *i32) callconv(.c) void = undefined;
+var glGetShaderInfoLog_: *const fn (u32, i32, *i32, [*]u8) callconv(.c) void = undefined;
+var glGetProgramInfoLog_: *const fn (u32, i32, *i32, [*]u8) callconv(.c) void = undefined;
+var glDeleteShader_: *const fn (u32) callconv(.c) void = undefined;
+var glDeleteProgram_: *const fn (u32) callconv(.c) void = undefined;
+var glGetAttribLocation_: *const fn (u32, [*:0]const u8) callconv(.c) i32 = undefined;
+var glGetUniformLocation_: *const fn (u32, [*:0]const u8) callconv(.c) i32 = undefined;
+var glUniform1i_: *const fn (i32, i32) callconv(.c) void = undefined;
+var glUniform4f_: *const fn (i32, f32, f32, f32, f32) callconv(.c) void = undefined;
+var glUniformMatrix4fv_: *const fn (i32, i32, u8, [*]const f32) callconv(.c) void = undefined;
+var glDrawArrays_: *const fn (u32, i32, i32) callconv(.c) void = undefined;
 
 // ---------------------------------------------------------------------------
 // GL constants
@@ -106,13 +152,13 @@ const GLX_CONTEXT_CORE_PROFILE_BIT_ARB: u32 = 0x00000001;
 const GLX_CONTEXT_FORWARD_COMPATIBLE_BIT_ARB: u32 = 0x0002;
 
 // X11 event masks
-const KeyPressMask: u64 = 1 << 0;
-const KeyReleaseMask: u64 = 1 << 1;
-const ButtonPressMask: u64 = 1 << 2;
-const ButtonReleaseMask: u64 = 1 << 3;
-const PointerMotionMask: u64 = 1 << 6;
-const ExposureMask: u64 = 1 << 15;
-const StructureNotifyMask: u64 = 1 << 17;
+const KeyPressMask: u64 = 1;
+const KeyReleaseMask: u64 = 2;
+const ButtonPressMask: u64 = 4;
+const ButtonReleaseMask: u64 = 8;
+const PointerMotionMask: u64 = 64;
+const ExposureMask: u64 = 32768;
+const StructureNotifyMask: u64 = 131072;
 
 // X11 event types
 const KeyPress: u8 = 2;
@@ -123,74 +169,19 @@ const MotionNotify: u8 = 6;
 const ConfigureNotify: u8 = 22;
 const ClientMessage: u8 = 33;
 
-// X11 XEvent layout (big enough for any event)
 const XEvent = extern union {
     type_: u8,
     _pad: [95]u8,
 };
 
 // ---------------------------------------------------------------------------
-// GL function pointers (loaded via glXGetProcAddress)
-// ---------------------------------------------------------------------------
-var glViewport_: *const fn (x: i32, y: i32, w: i32, h: i32) callconv(.c) void = undefined;
-var glScissor_: *const fn (x: i32, y: i32, w: i32, h: i32) callconv(.c) void = undefined;
-var glEnable_: *const fn (cap: u32) callconv(.c) void = undefined;
-var glDisable_: *const fn (cap: u32) callconv(.c) void = undefined;
-var glBlendFunc_: *const fn (sfactor: u32, dfactor: u32) callconv(.c) void = undefined;
-var glClearColor_: *const fn (r: f32, g: f32, b: f32, a: f32) callconv(.c) void = undefined;
-var glClear_: *const fn (mask: u32) callconv(.c) void = undefined;
-
-var glGenBuffers_: *const fn (n: i32, buffers: *u32) callconv(.c) void = undefined;
-var glBindBuffer_: *const fn (target: u32, buffer: u32) callconv(.c) void = undefined;
-var glBufferData_: *const fn (target: u32, size: isize, data: ?*const anyopaque, usage: u32) callconv(.c) void = undefined;
-var glDeleteBuffers_: *const fn (n: i32, buffers: [*]const u32) callconv(.c) void = undefined;
-
-var glGenVertexArrays_: *const fn (n: i32, arrays: *u32) callconv(.c) void = undefined;
-var glBindVertexArray_: *const fn (array: u32) callconv(.c) void = undefined;
-var glDeleteVertexArrays_: *const fn (n: i32, arrays: [*]const u32) callconv(.c) void = undefined;
-var glEnableVertexAttribArray_: *const fn (index: u32) callconv(.c) void = undefined;
-var glDisableVertexAttribArray_: *const fn (index: u32) callconv(.c) void = undefined;
-var glVertexAttribPointer_: *const fn (index: u32, size: i32, typ: u32, normalized: u8, stride: i32, ptr: ?*const anyopaque) callconv(.c) void = undefined;
-
-var glGenTextures_: *const fn (n: i32, textures: *u32) callconv(.c) void = undefined;
-var glBindTexture_: *const fn (target: u32, texture: u32) callconv(.c) void = undefined;
-var glTexImage2D_: *const fn (target: u32, level: i32, internal: i32, w: i32, h: i32, border: i32, format: u32, typ: u32, pixels: ?*const anyopaque) callconv(.c) void = undefined;
-var glTexParameteri_: *const fn (target: u32, pname: u32, param: i32) callconv(.c) void = undefined;
-var glDeleteTextures_: *const fn (n: i32, textures: [*]const u32) callconv(.c) void = undefined;
-var glActiveTexture_: *const fn (texture: u32) callconv(.c) void = undefined;
-
-var glCreateShader_: *const fn (shader_type: u32) callconv(.c) u32 = undefined;
-var glShaderSource_: *const fn (shader: u32, count: i32, src: *const [*:0]const u8, len: ?*const i32) callconv(.c) void = undefined;
-var glCompileShader_: *const fn (shader: u32) callconv(.c) void = undefined;
-var glCreateProgram_: *const fn () callconv(.c) u32 = undefined;
-var glAttachShader_: *const fn (program: u32, shader: u32) callconv(.c) void = undefined;
-var glLinkProgram_: *const fn (program: u32) callconv(.c) void = undefined;
-var glUseProgram_: *const fn (program: u32) callconv(.c) void = undefined;
-var glGetShaderiv_: *const fn (shader: u32, pname: u32, params: *i32) callconv(.c) void = undefined;
-var glGetProgramiv_: *const fn (program: u32, pname: u32, params: *i32) callconv(.c) void = undefined;
-var glGetShaderInfoLog_: *const fn (shader: u32, buf_size: i32, len: *i32, info: [*]u8) callconv(.c) void = undefined;
-var glGetProgramInfoLog_: *const fn (program: u32, buf_size: i32, len: *i32, info: [*]u8) callconv(.c) void = undefined;
-var glDeleteShader_: *const fn (shader: u32) callconv(.c) void = undefined;
-var glDeleteProgram_: *const fn (program: u32) callconv(.c) void = undefined;
-var glGetAttribLocation_: *const fn (program: u32, name: [*:0]const u8) callconv(.c) i32 = undefined;
-var glGetUniformLocation_: *const fn (program: u32, name: [*:0]const u8) callconv(.c) i32 = undefined;
-var glUniform1i_: *const fn (loc: i32, v: i32) callconv(.c) void = undefined;
-var glUniform4f_: *const fn (loc: i32, x: f32, y: f32, z: f32, w: f32) callconv(.c) void = undefined;
-var glUniformMatrix4fv_: *const fn (loc: i32, count: i32, transpose: u8, value: [*]const f32) callconv(.c) void = undefined;
-var glDrawArrays_: *const fn (mode: u32, first: i32, count: i32) callconv(.c) void = undefined;
-
-fn loadGL(comptime T: type, name: [*:0]const u8) ?T {
-    const ptr = glXGetProcAddress(name) orelse return null;
-    return @as(T, @ptrCast(@alignCast(ptr)));
-}
-
-// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 var active = false;
+var lib_x11: ?*elf.LibHandle = null;
+var lib_gl: ?*elf.LibHandle = null;
 var x_dpy: ?*anyopaque = null;
 var x_screen: i32 = 0;
-var x_root: u64 = 0;
 var x_win: u64 = 0;
 var glx_drawable: u64 = 0;
 var glx_ctx: u64 = 0;
@@ -228,7 +219,7 @@ const Vertex = extern struct {
 // ---------------------------------------------------------------------------
 const ATLAS_W = 512;
 const ATLAS_H = 64;
-const ATLAS_COLS = 32; // 512 / 16
+const ATLAS_COLS = 32;
 
 var atlas_uv_scale_x: f32 = 0;
 var atlas_uv_scale_y: f32 = 0;
@@ -264,7 +255,6 @@ fn generateFontAtlas() [ATLAS_W * ATLAS_H * 4]u8 {
 // ---------------------------------------------------------------------------
 // Shaders
 // ---------------------------------------------------------------------------
-
 const VS_SRC: [*:0]const u8 =
     \\#version 330 core
     \\layout(location=0) in vec2 aPos;
@@ -337,7 +327,6 @@ fn linkProg(vs: u32, fs: u32) u32 {
 // ---------------------------------------------------------------------------
 // Projection matrix (column-major)
 // ---------------------------------------------------------------------------
-
 fn orthoMatrix(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32) [16]f32 {
     return .{
         2.0 / (right - left), 0, 0, 0,
@@ -350,7 +339,6 @@ fn orthoMatrix(left: f32, right: f32, bottom: f32, top: f32, near: f32, far: f32
 // ---------------------------------------------------------------------------
 // Color packing
 // ---------------------------------------------------------------------------
-
 fn packColor(r: u8, g: u8, b: u8, a: u8) u32 {
     return @as(u32, a) << 24 | @as(u32, b) << 16 | @as(u32, g) << 8 | @as(u32, r);
 }
@@ -364,9 +352,8 @@ fn packU32(color: u32) u32 {
 }
 
 // ---------------------------------------------------------------------------
-// Math (no std)
+// Math
 // ---------------------------------------------------------------------------
-
 fn mathSin(x: f32) f32 {
     var v = x;
     const pi: f32 = 3.14159265;
@@ -383,7 +370,6 @@ fn mathCos(x: f32) f32 {
 // ---------------------------------------------------------------------------
 // Batch internals
 // ---------------------------------------------------------------------------
-
 fn flushBatch() void {
     if (batch_count == 0) return;
     glBufferData_(GL_ARRAY_BUFFER, @intCast(@as(u64, batch_count) * @sizeOf(Vertex)), batch_verts, GL_DYNAMIC_DRAW);
@@ -392,9 +378,7 @@ fn flushBatch() void {
 }
 
 fn ensureCap(needed: u32) void {
-    if (batch_count + needed > MAX_BATCH_VERTS) {
-        flushBatch();
-    }
+    if (batch_count + needed > MAX_BATCH_VERTS) flushBatch();
 }
 
 fn pushVert(x: f32, y: f32, u: f32, v: f32, color: u32) void {
@@ -428,11 +412,47 @@ fn setMode(mode: u32) void {
 }
 
 // ---------------------------------------------------------------------------
+// libGL.so function loading via glXGetProcAddress
+// ---------------------------------------------------------------------------
+fn loadGL(comptime T: type, name: [*:0]const u8) ?T {
+    const ptr = glXGetProcAddress_(name) orelse return null;
+    return @as(T, @ptrCast(@alignCast(ptr)));
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
 pub fn init(w: u32, h: u32) bool {
     if (active) return true;
+
+    // Load libX11.so at runtime
+    lib_x11 = elf.open("libX11.so") orelse return false;
+    XOpenDisplay_ = @as(@TypeOf(XOpenDisplay_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XOpenDisplay") orelse return false)));
+    XDefaultScreen_ = @as(@TypeOf(XDefaultScreen_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XDefaultScreen") orelse return false)));
+    XDefaultRootWindow_ = @as(@TypeOf(XDefaultRootWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XDefaultRootWindow") orelse return false)));
+    XCreateWindow_ = @as(@TypeOf(XCreateWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XCreateWindow") orelse return false)));
+    XMapWindow_ = @as(@TypeOf(XMapWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XMapWindow") orelse return false)));
+    XStoreName_ = @as(@TypeOf(XStoreName_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XStoreName") orelse return false)));
+    XSelectInput_ = @as(@TypeOf(XSelectInput_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XSelectInput") orelse return false)));
+    XNextEvent_ = @as(@TypeOf(XNextEvent_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XNextEvent") orelse return false)));
+    XPending_ = @as(@TypeOf(XPending_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XPending") orelse return false)));
+    XCloseDisplay_ = @as(@TypeOf(XCloseDisplay_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XCloseDisplay") orelse return false)));
+    XDestroyWindow_ = @as(@TypeOf(XDestroyWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XDestroyWindow") orelse return false)));
+    XFlush_ = @as(@TypeOf(XFlush_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XFlush") orelse return false)));
+    XInternAtom_ = @as(@TypeOf(XInternAtom_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XInternAtom") orelse return false)));
+    XChangeProperty_ = @as(@TypeOf(XChangeProperty_), @ptrCast(@alignCast(elf.findSymbol(lib_x11.?, "XChangeProperty") orelse return false)));
+
+    // Load libGL.so at runtime
+    lib_gl = elf.open("libGL.so") orelse return false;
+    glXChooseFBConfig_ = @as(@TypeOf(glXChooseFBConfig_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXChooseFBConfig") orelse return false)));
+    glXGetVisualFromFBConfig_ = @as(@TypeOf(glXGetVisualFromFBConfig_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXGetVisualFromFBConfig") orelse return false)));
+    glXCreateWindow_ = @as(@TypeOf(glXCreateWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXCreateWindow") orelse return false)));
+    glXMakeCurrent_ = @as(@TypeOf(glXMakeCurrent_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXMakeCurrent") orelse return false)));
+    glXSwapBuffers_ = @as(@TypeOf(glXSwapBuffers_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXSwapBuffers") orelse return false)));
+    glXDestroyContext_ = @as(@TypeOf(glXDestroyContext_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXDestroyContext") orelse return false)));
+    glXDestroyWindow_ = @as(@TypeOf(glXDestroyWindow_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXDestroyWindow") orelse return false)));
+    glXGetProcAddress_ = @as(@TypeOf(glXGetProcAddress_), @ptrCast(@alignCast(elf.findSymbol(lib_gl.?, "glXGetProcAddress") orelse return false)));
 
     // Load GL functions via glXGetProcAddress
     glViewport_ = loadGL(@TypeOf(glViewport_), "glViewport") orelse return false;
@@ -442,26 +462,22 @@ pub fn init(w: u32, h: u32) bool {
     glBlendFunc_ = loadGL(@TypeOf(glBlendFunc_), "glBlendFunc") orelse return false;
     glClearColor_ = loadGL(@TypeOf(glClearColor_), "glClearColor") orelse return false;
     glClear_ = loadGL(@TypeOf(glClear_), "glClear") orelse return false;
-
     glGenBuffers_ = loadGL(@TypeOf(glGenBuffers_), "glGenBuffers") orelse return false;
     glBindBuffer_ = loadGL(@TypeOf(glBindBuffer_), "glBindBuffer") orelse return false;
     glBufferData_ = loadGL(@TypeOf(glBufferData_), "glBufferData") orelse return false;
     glDeleteBuffers_ = loadGL(@TypeOf(glDeleteBuffers_), "glDeleteBuffers") orelse return false;
-
     glGenVertexArrays_ = loadGL(@TypeOf(glGenVertexArrays_), "glGenVertexArrays") orelse return false;
     glBindVertexArray_ = loadGL(@TypeOf(glBindVertexArray_), "glBindVertexArray") orelse return false;
     glDeleteVertexArrays_ = loadGL(@TypeOf(glDeleteVertexArrays_), "glDeleteVertexArrays") orelse return false;
     glEnableVertexAttribArray_ = loadGL(@TypeOf(glEnableVertexAttribArray_), "glEnableVertexAttribArray") orelse return false;
     glDisableVertexAttribArray_ = loadGL(@TypeOf(glDisableVertexAttribArray_), "glDisableVertexAttribArray") orelse return false;
     glVertexAttribPointer_ = loadGL(@TypeOf(glVertexAttribPointer_), "glVertexAttribPointer") orelse return false;
-
     glGenTextures_ = loadGL(@TypeOf(glGenTextures_), "glGenTextures") orelse return false;
     glBindTexture_ = loadGL(@TypeOf(glBindTexture_), "glBindTexture") orelse return false;
     glTexImage2D_ = loadGL(@TypeOf(glTexImage2D_), "glTexImage2D") orelse return false;
     glTexParameteri_ = loadGL(@TypeOf(glTexParameteri_), "glTexParameteri") orelse return false;
     glDeleteTextures_ = loadGL(@TypeOf(glDeleteTextures_), "glDeleteTextures") orelse return false;
     glActiveTexture_ = loadGL(@TypeOf(glActiveTexture_), "glActiveTexture") orelse return false;
-
     glCreateShader_ = loadGL(@TypeOf(glCreateShader_), "glCreateShader") orelse return false;
     glShaderSource_ = loadGL(@TypeOf(glShaderSource_), "glShaderSource") orelse return false;
     glCompileShader_ = loadGL(@TypeOf(glCompileShader_), "glCompileShader") orelse return false;
@@ -482,15 +498,15 @@ pub fn init(w: u32, h: u32) bool {
     glUniformMatrix4fv_ = loadGL(@TypeOf(glUniformMatrix4fv_), "glUniformMatrix4fv") orelse return false;
     glDrawArrays_ = loadGL(@TypeOf(glDrawArrays_), "glDrawArrays") orelse return false;
 
-    // Load glXCreateContextAttribsARB
+    // Load glXCreateContextAttribsARB extension
     glXCreateContextAttribsARB_ = @as(GlXCreateContextAttribsARB, @ptrCast(@alignCast(
-        glXGetProcAddress("glXCreateContextAttribsARB") orelse return false,
+        glXGetProcAddress_("glXCreateContextAttribsARB") orelse return false,
     )));
 
     // Open X11 display
-    x_dpy = XOpenDisplay(null) orelse return false;
-    x_screen = XDefaultScreen(x_dpy.?);
-    x_root = XDefaultRootWindow(x_dpy.?);
+    x_dpy = XOpenDisplay_(null) orelse return false;
+    x_screen = XDefaultScreen_(x_dpy.?);
+    const x_root = XDefaultRootWindow_(x_dpy.?);
 
     // Choose GLX FBConfig
     var fb_attribs = [_]i32{
@@ -505,49 +521,31 @@ pub fn init(w: u32, h: u32) bool {
         GLX_NONE,
     };
     var num_configs: i32 = 0;
-    const configs = glXChooseFBConfig(x_dpy.?, x_screen, &fb_attribs, &num_configs) orelse return false;
+    const configs = glXChooseFBConfig_(x_dpy.?, x_screen, &fb_attribs, &num_configs) orelse return false;
     if (num_configs == 0) return false;
     const config = configs[0];
-    // Free the config list (we only need the first one)
 
-    // Get visual for window creation
-    const vis_info = glXGetVisualFromFBConfig(x_dpy.?, config) orelse return false;
+    // Get visual for window
+    const vis_info = glXGetVisualFromFBConfig_(x_dpy.?, config) orelse return false;
     const visual = vis_info.visual orelse return false;
 
     // Create window
-    x_win = XCreateWindow(
-        x_dpy.?,
-        x_root,
-        0, 0,
-        w, h,
-        0,
-        24, // depth
-        1, // InputOutput
-        visual,
-        0x2082, // CWColormap | CWEventMask | CWBackPixel
-        @ptrFromInt(0),
-    );
+    x_win = XCreateWindow_(x_dpy.?, x_root, 0, 0, w, h, 0, 24, 1, visual, 0x2082, null);
     if (x_win == 0) return false;
 
-    // Set title
-    _ = XStoreName(x_dpy.?, x_win, "dhjsjs OpenGL 3.3");
+    _ = XStoreName_(x_dpy.?, x_win, "dhjsjs OpenGL 3.3");
+    _ = XSelectInput_(x_dpy.?, x_win, @intCast(KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | ExposureMask | StructureNotifyMask));
+    _ = XMapWindow_(x_dpy.?, x_win);
+    _ = XFlush_(x_dpy.?);
 
-    // Select input events
-    _ = XSelectInput(x_dpy.?, x_win, @intCast(KeyPressMask | KeyReleaseMask | ButtonPressMask | ButtonReleaseMask | PointerMotionMask | ExposureMask | StructureNotifyMask));
+    // WM_DELETE_WINDOW
+    wm_delete_msg = XInternAtom_(x_dpy.?, "WM_DELETE_WINDOW", 0);
+    _ = XChangeProperty_(x_dpy.?, x_win, XInternAtom_(x_dpy.?, "WM_PROTOCOLS", 0), 6, 32, 0, @ptrCast(&wm_delete_msg), 1);
 
-    // Map window
-    _ = XMapWindow(x_dpy.?, x_win);
-    _ = XFlush(x_dpy.?);
-
-    // Register WM_DELETE_WINDOW
-    wm_delete_msg = XInternAtom(x_dpy.?, "WM_DELETE_WINDOW", 0);
-    _ = XChangeProperty(x_dpy.?, x_win, XInternAtom(x_dpy.?, "WM_PROTOCOLS", 0), 6, 32, 0, @ptrCast(&wm_delete_msg), 1);
-
-    // Create GLX drawable
-    glx_drawable = glXCreateWindow(x_dpy.?, config, x_win, null);
+    // Create GLX drawable + context
+    glx_drawable = glXCreateWindow_(x_dpy.?, config, x_win, null);
     if (glx_drawable == 0) return false;
 
-    // Create GL 3.3 Core context
     var ctx_attribs = [_]i32{
         @intCast(GLX_CONTEXT_MAJOR_VERSION_ARB), 3,
         @intCast(GLX_CONTEXT_MINOR_VERSION_ARB), 3,
@@ -557,9 +555,7 @@ pub fn init(w: u32, h: u32) bool {
     };
     glx_ctx = glXCreateContextAttribsARB_.?(x_dpy.?, config, 0, 1, &ctx_attribs);
     if (glx_ctx == 0) return false;
-
-    // Make current
-    if (glXMakeCurrent(x_dpy.?, glx_drawable, glx_ctx) == 0) return false;
+    if (glXMakeCurrent_(x_dpy.?, glx_drawable, glx_ctx) == 0) return false;
 
     win_w = w;
     win_h = h;
@@ -569,7 +565,7 @@ pub fn init(w: u32, h: u32) bool {
     glEnable_(GL_BLEND);
     glBlendFunc_(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
-    // Compile shaders
+    // Shaders
     const vs = compileShader(VS_SRC, GL_VERTEX_SHADER);
     const fs = compileShader(FS_SRC, GL_FRAGMENT_SHADER);
     if (vs == 0 or fs == 0) return false;
@@ -591,7 +587,6 @@ pub fn init(w: u32, h: u32) bool {
     // VAO + VBO
     glGenVertexArrays_(1, &vao);
     glBindVertexArray_(vao);
-
     glGenBuffers_(1, &vbo);
     glBindBuffer_(GL_ARRAY_BUFFER, vbo);
     glBufferData_(GL_ARRAY_BUFFER, @intCast(MAX_BATCH_VERTS * @sizeOf(Vertex)), null, GL_DYNAMIC_DRAW);
@@ -625,33 +620,18 @@ pub fn init(w: u32, h: u32) bool {
 pub fn deinit() void {
     if (!active) return;
     active = false;
-
     flushBatch();
-
-    if (glx_drawable != 0) glXDestroyWindow(x_dpy.?, glx_drawable);
-    if (glx_ctx != 0) glXDestroyContext(x_dpy.?, glx_ctx);
-
-    if (vbo != 0) {
-        const bufs = [_]u32{vbo};
-        glDeleteBuffers_(1, &bufs);
-    }
-    if (vao != 0) {
-        const arrs = [_]u32{vao};
-        glDeleteVertexArrays_(1, &arrs);
-    }
+    if (glx_drawable != 0) glXDestroyWindow_(x_dpy.?, glx_drawable);
+    if (glx_ctx != 0) glXDestroyContext_(x_dpy.?, glx_ctx);
+    if (vbo != 0) { const b = [_]u32{vbo}; glDeleteBuffers_(1, &b); }
+    if (vao != 0) { const a = [_]u32{vao}; glDeleteVertexArrays_(1, &a); }
     if (shader_prog != 0) glDeleteProgram_(shader_prog);
-    if (font_atlas_tex != 0) {
-        const texs = [_]u32{font_atlas_tex};
-        glDeleteTextures_(1, &texs);
-    }
-
+    if (font_atlas_tex != 0) { const t = [_]u32{font_atlas_tex}; glDeleteTextures_(1, &t); }
     sys.munmap(@ptrCast(batch_verts), MAX_BATCH_VERTS * @sizeOf(Vertex));
-
-    if (x_win != 0) _ = XDestroyWindow(x_dpy.?, x_win);
-    if (x_dpy) |dpy| {
-        _ = XCloseDisplay(dpy);
-        x_dpy = null;
-    }
+    if (x_win != 0) _ = XDestroyWindow_(x_dpy.?, x_win);
+    if (x_dpy) |dpy| { _ = XCloseDisplay_(dpy); x_dpy = null; }
+    lib_gl = null;
+    lib_x11 = null;
 }
 
 pub fn beginFrame() void {
@@ -670,47 +650,33 @@ pub fn beginFrame() void {
 pub fn endFrame() void {
     if (!active) return;
     flushBatch();
-    glXSwapBuffers(x_dpy.?, glx_drawable);
+    glXSwapBuffers_(x_dpy.?, glx_drawable);
 }
 
 pub fn pollEvent() ?Event {
     if (!active or x_dpy == null) return null;
-
-    while (XPending(x_dpy.?) > 0) {
+    while (XPending_(x_dpy.?) > 0) {
         var ev: XEvent = undefined;
-        _ = XNextEvent(x_dpy.?, &ev);
-        const ev_type = ev.type_;
-
-        if (ev_type == KeyPress) {
-            // XKeyEvent: type(1) + pad(1) + serial(4) + send_event(4) + display(8) + window(8) + root(8) + subwindow(8) + time(8) + x,y(4+4) + state(4) + keycode(1) + same_screen(1)
-            // keycode is at offset 44 in the event struct
-            const keycode = ev._pad[43]; // 0-indexed, 44th byte
-            return .{ .key_press = keycode };
-        }
-        if (ev_type == KeyRelease) {
-            const keycode = ev._pad[43];
-            return .{ .key_release = keycode };
-        }
-        if (ev_type == ButtonPress) {
-            // XButtonEvent: x,y at offsets 16,20 (i16), button at offset 41 (u8)
+        _ = XNextEvent_(x_dpy.?, &ev);
+        const t = ev.type_;
+        if (t == KeyPress) return .{ .key_press = ev._pad[43] };
+        if (t == KeyRelease) return .{ .key_release = ev._pad[43] };
+        if (t == ButtonPress) {
             const mx = @as(i16, @bitCast(@as(u16, ev._pad[16] | (@as(u16, ev._pad[17]) << 8))));
             const my = @as(i16, @bitCast(@as(u16, ev._pad[20] | (@as(u16, ev._pad[21]) << 8))));
-            const btn = ev._pad[41];
-            return .{ .mouse_down = .{ .x = mx, .y = my, .button = btn } };
+            return .{ .mouse_down = .{ .x = mx, .y = my, .button = ev._pad[41] } };
         }
-        if (ev_type == ButtonRelease) {
+        if (t == ButtonRelease) {
             const mx = @as(i16, @bitCast(@as(u16, ev._pad[16] | (@as(u16, ev._pad[17]) << 8))));
             const my = @as(i16, @bitCast(@as(u16, ev._pad[20] | (@as(u16, ev._pad[21]) << 8))));
-            const btn = ev._pad[41];
-            return .{ .mouse_up = .{ .x = mx, .y = my, .button = btn } };
+            return .{ .mouse_up = .{ .x = mx, .y = my, .button = ev._pad[41] } };
         }
-        if (ev_type == MotionNotify) {
+        if (t == MotionNotify) {
             const mx = @as(i16, @bitCast(@as(u16, ev._pad[16] | (@as(u16, ev._pad[17]) << 8))));
             const my = @as(i16, @bitCast(@as(u16, ev._pad[20] | (@as(u16, ev._pad[21]) << 8))));
             return .{ .mouse_move = .{ .x = mx, .y = my } };
         }
-        if (ev_type == ConfigureNotify) {
-            // XConfigureEvent: x,y(16), width(18), height(20) as i16
+        if (t == ConfigureNotify) {
             const nw = @as(u16, @bitCast(@as(i16, @bitCast(@as(u16, ev._pad[18] | (@as(u16, ev._pad[19]) << 8))))));
             const nh = @as(u16, @bitCast(@as(i16, @bitCast(@as(u16, ev._pad[20] | (@as(u16, ev._pad[21]) << 8))))));
             if (nw != win_w or nh != win_h) {
@@ -723,11 +689,9 @@ pub fn pollEvent() ?Event {
             }
             return .{ .resize = .{ .w = win_w, .h = win_h } };
         }
-        if (ev_type == ClientMessage) {
-            // Check WM_DELETE_WINDOW
-            // XClientMessageEvent: format at offset 32, data at offset 36
-            const data32_0 = @as(u64, ev._pad[36]) | (@as(u64, ev._pad[37]) << 8) | (@as(u64, ev._pad[38]) << 16) | (@as(u64, ev._pad[39]) << 24);
-            if (data32_0 == wm_delete_msg) return .close;
+        if (t == ClientMessage) {
+            const d0 = @as(u64, ev._pad[36]) | (@as(u64, ev._pad[37]) << 8) | (@as(u64, ev._pad[38]) << 16) | (@as(u64, ev._pad[39]) << 24);
+            if (d0 == wm_delete_msg) return .close;
         }
     }
     return null;
@@ -746,7 +710,6 @@ pub fn resize(w: u32, h: u32) void {
 // ---------------------------------------------------------------------------
 // Drawing
 // ---------------------------------------------------------------------------
-
 pub fn fillRect(x: i32, y: i32, w: i32, h: i32, color: u32) void {
     if (!active or w <= 0 or h <= 0) return;
     setTex(0);
@@ -815,17 +778,11 @@ pub fn fillRoundedRect(x: i32, y: i32, w: i32, h: i32, r: i32, color: u32) void 
     const c = packU32(color);
     setTex(0);
     setMode(0);
-
-    // Center
-    if (w > r * 2 and h > r * 2) {
-        fillRect(x + r, y, w - r * 2, h, color);
-    }
-    // Left/right strips
+    if (w > r * 2 and h > r * 2) fillRect(x + r, y, w - r * 2, h, color);
     if (r > 0) {
         fillRect(x, y + r, r, h - r * 2, color);
         fillRect(x + w - r, y + r, r, h - r * 2, color);
     }
-    // Corner fans
     for (0..4) |corner| {
         const cx: f32 = @floatFromInt(x + if (corner == 1 or corner == 3) w - r else r);
         const cy: f32 = @floatFromInt(y + if (corner == 2 or corner == 3) h - r else r);
@@ -920,7 +877,6 @@ pub fn blitPixels(dx: i32, dy: i32, dw: u32, dh: u32, pixels: [*]u32, stride: u3
 // ---------------------------------------------------------------------------
 // Events
 // ---------------------------------------------------------------------------
-
 pub const Event = union(enum) {
     key_press: u8,
     key_release: u8,
@@ -940,4 +896,3 @@ pub const MouseData = struct {
 pub fn isActive() bool { return active; }
 pub fn getWidth() u32 { return win_w; }
 pub fn getHeight() u32 { return win_h; }
-pub fn getDisplay() ?*anyopaque { return x_dpy; }
