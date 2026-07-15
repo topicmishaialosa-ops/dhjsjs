@@ -1,0 +1,56 @@
+// Game demo using GL3 GPU rendering
+// Compile: ./dhjsjs_cc build examples/game_demo.dhjsjs
+// Run: ./output/out.bin
+
+fn main() {
+    hui efd = gl3Init(800, 600);
+    hui running = 1;
+    hui player_x = 380;
+    hui player_y = 500;
+    hui score = 0;
+    hui frame = 0;
+
+    while running {
+        gl3Cmd(efd, 3, 0, 0, 0, 0); // BEGIN_FRAME
+
+        // Clear background with gradient
+        gl3Cmd(efd, 11, 0, 0, 800, 600); // FILL_GRAD_H (needs 2nd cmd for c1,c2)
+
+        // Draw player (green rounded rect)
+        gl3Cmd(efd, 14, player_x, player_y, 40, 30); // FILL_ROUNDED (needs 2nd cmd for r, color)
+
+        // Draw some obstacles (red rects)
+        gl3Cmd(efd, 10, 100, 200, 60, 20); // FILL_RECT
+        gl3Cmd(efd, 10, 300, 300, 60, 20);
+        gl3Cmd(efd, 10, 500, 150, 60, 20);
+
+        // Draw score text
+        gl3Cmd(efd, 20, 10, 10, 5, 0xFFFFFF); // DRAW_TEXT (needs text data)
+
+        gl3Cmd(efd, 30, 0, 0, 0, 0); // FLUSH
+        gl3Cmd(efd, 4, 0, 0, 0, 0); // END_FRAME
+
+        // Read events
+        hui ev_buf = gl3ReadEvent(efd);
+        // ev_buf[0] = resp_type, ev_buf[4..8] = event_type, ev_buf[8..16] = data
+        hui ev_type = *(ev_buf + 4);
+        if ev_type == 6 {
+            running = 0;
+        }
+        if ev_type == 1 {
+            hui keycode = *(ev_buf + 8);
+            // Left arrow = 113, Right = 114
+            if keycode == 113 {
+                player_x = player_x - 10;
+            }
+            if keycode == 114 {
+                player_x = player_x + 10;
+            }
+        }
+
+        gl3Cmd(efd, 40, 16, 0, 0, 0); // SLEEP 16ms (~60fps)
+        frame = frame + 1;
+    }
+
+    gl3Cmd(efd, 2, 0, 0, 0, 0); // DEINIT
+}
