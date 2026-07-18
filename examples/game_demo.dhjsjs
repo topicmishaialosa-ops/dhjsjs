@@ -1,56 +1,243 @@
-// Game demo using GL3 GPU rendering
-// Compile: ./dhjsjs_cc build examples/game_demo.dhjsjs
-// Run: ./output/out.bin
+// ============================================================================
+// game_demo.dhjsjs — Complete game example with GPU rendering
+// Simple platformer with physics, collision, and input handling
+// ============================================================================
+
+// Game constants
+const SCREEN_W = 800
+const SCREEN_H = 600
+const PLAYER_W = 32
+const PLAYER_H = 48
+const GRAVITY = 0.6
+
+// Player state
+hui player_x = 100
+hui player_y = 300
+hui player_vx = 0
+hui player_vy = 0
+hui player_jump = 0
+
+// Camera
+hui camera_x = 0
+
+// Input state
+hui key_left = 0
+hui key_right = 0
+hui key_up = 0
+
+// Score
+hui score = 0
+hui frames = 0
+
+// Platform data (x, y, w, h)
+struct Platform {
+    x: int
+    y: int
+    w: int
+    h: int
+}
+
+// Level platforms
+hui platform1 = Platform{ x: 0, y: 500, w: 800, h: 100 }
+hui platform2 = Platform{ x: 200, y: 400, w: 200, h: 20 }
+hui platform3 = Platform{ x: 500, y: 350, w: 200, h: 20 }
 
 fn main() {
-    hui efd = gl3Init(800, 600);
-    hui running = 1;
-    hui player_x = 380;
-    hui player_y = 500;
-    hui score = 0;
-    hui frame = 0;
-
+    // Initialize graphics
+    gl3Init(SCREEN_W, SCREEN_H)
+    
+    // Game loop
+    hui running = 1
     while running {
-        gl3Cmd(efd, 3, 0, 0, 0, 0); // BEGIN_FRAME
-
-        // Clear background with gradient
-        gl3Cmd(efd, 11, 0, 0, 800, 600); // FILL_GRAD_H (needs 2nd cmd for c1,c2)
-
-        // Draw player (green rounded rect)
-        gl3Cmd(efd, 14, player_x, player_y, 40, 30); // FILL_ROUNDED (needs 2nd cmd for r, color)
-
-        // Draw some obstacles (red rects)
-        gl3Cmd(efd, 10, 100, 200, 60, 20); // FILL_RECT
-        gl3Cmd(efd, 10, 300, 300, 60, 20);
-        gl3Cmd(efd, 10, 500, 150, 60, 20);
-
-        // Draw score text
-        gl3Cmd(efd, 20, 10, 10, 5, 0xFFFFFF); // DRAW_TEXT (needs text data)
-
-        gl3Cmd(efd, 30, 0, 0, 0, 0); // FLUSH
-        gl3Cmd(efd, 4, 0, 0, 0, 0); // END_FRAME
-
-        // Read events
-        hui ev_buf = gl3ReadEvent(efd);
-        // ev_buf[0] = resp_type, ev_buf[4..8] = event_type, ev_buf[8..16] = data
-        hui ev_type = *(ev_buf + 4);
-        if ev_type == 6 {
-            running = 0;
-        }
-        if ev_type == 1 {
-            hui keycode = *(ev_buf + 8);
-            // Left arrow = 113, Right = 114
-            if keycode == 113 {
-                player_x = player_x - 10;
+        // Poll events and handle input
+        hui ev = gl3PollEvent()
+        while ev != 0 {
+            hui evt_type = gl3EventType(ev)
+            if evt_type == 6 {  // Close
+                running = 0
+            } uebok {
+                if evt_type == 1 {  // Key press
+                    hui key = gl3EventData(ev)
+                    if key == 97 {  // 'a'
+                        key_left = 1
+                    } uebok {
+                        if key == 100 {  // 'd'
+                            key_right = 1
+                        } uebok {
+                            if key == 32 {  // Space
+                                key_up = 1
+                            }
+                        }
+                    }
+                } uebok {
+                    if evt_type == 2 {  // Key release
+                        hui key = gl3EventData(ev)
+                        if key == 97 {  // 'a'
+                            key_left = 0
+                        } uebok {
+                            if key == 100 {  // 'd'
+                                key_right = 0
+                            } uebok {
+                                if key == 32 {  // Space
+                                    key_up = 0
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            if keycode == 114 {
-                player_x = player_x + 10;
+            ev = gl3PollEvent()
+        }
+        
+        // Update physics
+        if key_left {
+            player_vx = -5
+        } uebok {
+            if key_right {
+                player_vx = 5
+            } uebok {
+                player_vx = 0
             }
         }
-
-        gl3Cmd(efd, 40, 16, 0, 0, 0); // SLEEP 16ms (~60fps)
-        frame = frame + 1;
+        
+        // Apply gravity
+        player_vy = player_vy + GRAVITY
+        
+        // Update position
+        player_x = player_x + player_vx
+        player_y = player_y + player_vy
+        
+        // Collision detection and jumping
+        if checkCollision(player_x, player_y, PLAYER_W, PLAYER_H, platform1) {
+            player_y = 500 - PLAYER_H
+            player_vy = 0
+            if key_up {
+                player_vy = -12
+            }
+        } uebok {
+            if checkCollision(player_x, player_y, PLAYER_W, PLAYER_H, platform2) {
+                player_y = 400 - PLAYER_H
+                player_vy = 0
+                if key_up {
+                    player_vy = -12
+                }
+            } uebok {
+                if checkCollision(player_x, player_y, PLAYER_W, PLAYER_H, platform3) {
+                    player_y = 350 - PLAYER_H
+                    player_vy = 0
+                    if key_up {
+                        player_vy = -12
+                    }
+                }
+            }
+        }
+        
+        // Camera follows player
+        camera_x = player_x - 200
+        
+        // Render frame
+        gl3BeginFrame()
+        
+        // Draw background gradient
+        gl3FillGradientV(0, 0, SCREEN_W, SCREEN_H, 0xFF1E1E2E, 0xFF45475A)
+        
+        // Draw platforms
+        gl3FillRect(platform1.x - camera_x, platform1.y - camera_y, platform1.w, platform1.h, 0xFF90BE6D)
+        gl3FillRect(platform2.x - camera_x, platform2.y - camera_y, platform2.w, platform2.h, 0xFF89B4FA)
+        gl3FillRect(platform3.x - camera_x, platform3.y - camera_y, platform3.w, platform3.h, 0xFFA6E3A1)
+        
+        // Draw player
+        gl3FillRoundedRect(player_x - camera_x, player_y - camera_y, PLAYER_W, PLAYER_H, 4, 0xFFF38BA8)
+        
+        // Draw score
+        gl3DrawText(10, 10, "Score: ", 7, 0xFFFFFFFF)
+        printNumber(70, 10, score, 0xFFFFFFFF)
+        
+        // Draw FPS
+        gl3DrawText(10, 30, "FPS: ", 5, 0xFFB4BEFE)
+        printNumber(60, 30, frames / 60, 0xFFB4BEFE)
+        
+        frames = frames + 1
+        
+        gl3EndFrame()
+        gl3SleepMs(16)  // ~60 FPS
     }
+    
+    gl3Deinit()
+}
 
-    gl3Cmd(efd, 2, 0, 0, 0, 0); // DEINIT
+fn checkCollision(px: int, py: int, pw: int, ph: int, plat: Platform) {
+    if px + pw > plat.x && px < plat.x + plat.w &&
+       py + ph > plat.y && py < plat.y + plat.h {
+        return 1
+    }
+    return 0
+}
+
+fn printNumber(x: int, y: int, n: int, color: int) {
+    // Simple number printing (0-999)
+    hui digits = 0
+    hui temp = n
+    while temp > 0 {
+        digits = digits + 1
+        temp = temp / 10
+    }
+    
+    if digits == 0 {
+        gl3DrawText(x, y, "0", 1, color)
+        return
+    }
+    
+    hui offset = 0
+    temp = n
+    hui power = 1
+    while power <= temp / 10 {
+        power = power * 10
+    }
+    
+    while power > 0 {
+        hui digit = temp / power
+        if digit == 0 {
+            gl3DrawText(x + offset, y, "0", 1, color)
+        } uebok {
+            if digit == 1 {
+                gl3DrawText(x + offset, y, "1", 1, color)
+            } uebok {
+                if digit == 2 {
+                    gl3DrawText(x + offset, y, "2", 1, color)
+                } uebok {
+                    if digit == 3 {
+                        gl3DrawText(x + offset, y, "3", 1, color)
+                    } uebok {
+                        if digit == 4 {
+                            gl3DrawText(x + offset, y, "4", 1, color)
+                        } uebok {
+                            if digit == 5 {
+                                gl3DrawText(x + offset, y, "5", 1, color)
+                            } uebok {
+                                if digit == 6 {
+                                    gl3DrawText(x + offset, y, "6", 1, color)
+                                } uebok {
+                                    if digit == 7 {
+                                        gl3DrawText(x + offset, y, "7", 1, color)
+                                    } uebok {
+                                        if digit == 8 {
+                                            gl3DrawText(x + offset, y, "8", 1, color)
+                                        } uebok {
+                                            if digit == 9 {
+                                                gl3DrawText(x + offset, y, "9", 1, color)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        offset = offset + 6
+        temp = temp - digit * power
+        power = power / 10
+    }
 }
